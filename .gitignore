@@ -1,0 +1,35 @@
+# Flutter
+.build/
+.dart_tool/
+.packages
+.pub/
+build/
+*.iml
+*.lock
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/google-services.json
+*.exe
+*.jks
+*license_keys*
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
