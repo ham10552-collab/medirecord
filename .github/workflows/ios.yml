@@ -18,7 +18,10 @@ jobs:
           channel: stable
 
       - name: Get dependencies
-        run: flutter pub get
+        run: |
+          mkdir -p build/ios
+          flutter pub get || true
+          flutter pub get
 
       - name: Build iOS (unsigned)
         run: flutter build ios --release --no-codesign
