@@ -273,16 +273,15 @@ void Win32Window::OnDestroy() {
 }
 
 void Win32Window::UpdateTheme(HWND const window) {
-  DWORD light_mode;
-  DWORD light_mode_size = sizeof(light_mode);
-  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
-                               kGetPreferredBrightnessRegValue,
-                               RRF_RT_REG_DWORD, nullptr, &light_mode,
-                               &light_mode_size);
+  BOOL enable_dark_mode = TRUE;
+  DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                        &enable_dark_mode, sizeof(enable_dark_mode));
 
-  if (result == ERROR_SUCCESS) {
-    BOOL enable_dark_mode = light_mode == 0;
-    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                          &enable_dark_mode, sizeof(enable_dark_mode));
-  }
+  // Title bar text + border accent color (champagne gold)
+  const DWORD DWMWA_TEXT_COLOR = 35;
+  const DWORD DWMWA_BORDER_COLOR = 34;
+  int title_color = 0xE7C95A;  // goldLight
+  int border_color = 0x0D2A5E; // navy
+  DwmSetWindowAttribute(window, DWMWA_TEXT_COLOR, &title_color, sizeof(title_color));
+  DwmSetWindowAttribute(window, DWMWA_BORDER_COLOR, &border_color, sizeof(border_color));
 }

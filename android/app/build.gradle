@@ -8,7 +8,6 @@ plugins {
 android {
     namespace "com.example.medirecord"
     compileSdk 36
-    ndkVersion "28.2.13676358"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -21,24 +20,18 @@ android {
 
     defaultConfig {
         applicationId "com.example.medirecord"
-        minSdkVersion flutter.minSdkVersion
-        targetSdk 36
+        minSdkVersion 24
+        targetSdk 33
         versionCode 1
         versionName "1.0.0"
-        multiDexEnabled true
     }
 
     buildTypes {
         release {
             signingConfig signingConfigs.debug
-            minifyEnabled false
-            shrinkResources false
-        }
-    }
-
-    packaging {
-        jniLibs {
-            useLegacyPackaging true
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }
@@ -48,7 +41,6 @@ flutter {
 }
 
 dependencies {
-    implementation 'androidx.multidex:multidex:2.0.1'
     implementation platform('com.google.firebase:firebase-bom:32.7.2')
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-firestore'

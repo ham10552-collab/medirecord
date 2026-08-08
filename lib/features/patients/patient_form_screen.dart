@@ -3,12 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../core/utils/app_storage.dart';
+import '../../core/license/license_manager.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/database/database_provider.dart';
 import '../../core/utils/constants.dart';
 import '../../shared/models/patient.dart';
+import '../../shared/widgets/luxury_figures.dart';
 
 class PatientFormScreen extends ConsumerStatefulWidget {
   final String? patientId;
@@ -72,34 +73,32 @@ class _PatientFormScreenState extends ConsumerState<PatientFormScreen> {
 
   Future<void> _save() async {
     if (!widget.isEditing) {
-      final trial = await AppStorage.read('medirecord_trial');
-      if (trial == 'true') {
-        final licensed = await AppStorage.read('medirecord_licensed');
-        if (licensed != 'true') {
-          final count = await DatabaseHelper().getPatientCount();
-          if (count >= 70) {
-            if (mounted) {
-              showDialog(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Trial Limit Reached'),
-                  content: const Text('You have reached the 70-patient limit for the free trial.'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        context.push('/license');
-                      },
-                      child: const Text('Activate License'),
-                    ),
-                  ],
-                ),
-              );
-            }
-            setState(() => _isLoading = false);
-            return;
+      final licensed = await LicenseManager.isLicensedOnDevice();
+      if (!licensed) {
+        final count = await DatabaseHelper().getPatientCount();
+        if (count >= AppConstants.maxTrialPatients) {
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Trial Limit Reached'),
+                content: Text(
+                    'You have reached the ${AppConstants.maxTrialPatients}-patient limit for the free trial.'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      context.push('/license');
+                    },
+                    child: const Text('Activate License'),
+                  ),
+                ],
+              ),
+            );
           }
+          setState(() => _isLoading = false);
+          return;
         }
       }
     }
@@ -135,7 +134,16 @@ class _PatientFormScreenState extends ConsumerState<PatientFormScreen> {
       if (widget.isEditing) {
         await db.updatePatient(patient);
       } else {
-        await db.insertPatient(patient);
+        final inserted = await db.insertPatient(patient);
+        if (inserted == 0) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Trial limit reached. Activate a license to continue.'),
+                backgroundColor: AppTheme.errorColor));
+          }
+          setState(() => _isLoading = false);
+          return;
+        }
       }
 
       if (mounted) {
@@ -161,12 +169,33 @@ class _PatientFormScreenState extends ConsumerState<PatientFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.isEditing ? 'Edit Patient' : 'Add Patient')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const MedicalCrossFigure(size: 16),
+            const SizedBox(width: 10),
+            Text(widget.isEditing ? 'Edit Patient' : 'Add Patient'),
+          ],
+        ),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Row(
+              children: [
+                const SparkleFigure(size: 12),
+                const SizedBox(width: 8),
+                Text('Patient Profile', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
+                const SizedBox(width: 8),
+                const SparkleFigure(size: 9),
+                const Spacer(),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const GoldDivider(),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(child: TextField(
@@ -190,11 +219,12 @@ class _PatientFormScreenState extends ConsumerState<PatientFormScreen> {
                 )),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _gender,
-                    decoration: const InputDecoration(labelText: 'Gender', prefixIcon: Icon(Icons.wc)),
-                    items: AppConstants.genders.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
-                    onChanged: (v) => setState(() => _gender = v!),
+                  child: Row(
+                    children: [
+                      _genderButton('Male'),
+                      const SizedBox(width: 8),
+                      _genderButton('Female'),
+                    ],
                   ),
                 ),
               ],
@@ -241,6 +271,49 @@ class _PatientFormScreenState extends ConsumerState<PatientFormScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _genderButton(String gender) {
+    final selected = _gender == gender;
+    final male = gender == 'Male';
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _gender = gender),
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: selected ? AppTheme.goldColor : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? AppTheme.goldDeep : AppTheme.goldColor,
+              width: 1.3,
+            ),
+            boxShadow: selected
+                ? [BoxShadow(color: AppTheme.goldColor.withValues(alpha: 0.3), blurRadius: 6, offset: const Offset(0, 2))]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                male ? Icons.male : Icons.female,
+                size: 18,
+                color: selected ? AppTheme.navyDeep : AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                gender,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: selected ? AppTheme.navyDeep : AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

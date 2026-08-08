@@ -46,4 +46,11 @@ class PlatformHelper {
     anchor.click();
     html.Url.revokeObjectUrl(url);
   }
+
+  static Future<void> openWhatsApp(String number, String message) async {
+    final digits = number.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return;
+    final url = 'https://wa.me/$digits?text=${Uri.encodeComponent(message)}';
+    html.window.open(url, '_blank');
+  }
 }

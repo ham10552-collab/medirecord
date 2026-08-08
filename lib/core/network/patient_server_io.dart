@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database_helper.dart';
+import '../license/license_manager.dart';
+import '../license/device_fingerprint.dart';
 import '../../shared/models/patient.dart';
 
 enum ServerState { stopped, starting, running, error }
@@ -67,13 +69,50 @@ class PatientServer extends ChangeNotifier {
       return;
     }
 
+    // Secondary (secretary) devices request a license seat from the primary
+    // doctor over this channel. Works identically over LAN or Wi-Fi.
+    if (method == 'POST' && uri == '/api/license/seat') {
+      request.response.headers.contentType = ContentType.json;
+      utf8.decodeStream(request).then((body) async {
+        try {
+          final data = json.decode(body) as Map<String, dynamic>;
+          final key = data['key'] as String? ?? '';
+          final machineId = data['machineId'] as String? ?? '';
+          final result = await LicenseManager.grantSeat(
+            key: key,
+            requestingMachineId: machineId,
+          );
+          request.response.statusCode = result.ok ? 200 : 403;
+          request.response.write(json.encode({
+            'status': result.ok ? 'ok' : 'error',
+            'message': result.message,
+            'seats': await LicenseManager.currentSeats(),
+          }));
+        } catch (e) {
+          request.response.statusCode = 400;
+          request.response.write(json.encode({'status': 'error', 'message': e.toString()}));
+        }
+        request.response.close();
+      });
+      return;
+    }
+
     if (method == 'POST' && uri == '/api/patient') {
       request.response.headers.contentType = ContentType.json;
       utf8.decodeStream(request).then((body) async {
         try {
           final data = json.decode(body) as Map<String, dynamic>;
           final patient = Patient.fromMap(data);
-          await DatabaseHelper().insertPatient(patient);
+          final inserted = await DatabaseHelper().insertPatient(patient);
+          if (inserted == 0) {
+            request.response.statusCode = 403;
+            request.response.write(json.encode({
+              'status': 'error',
+              'message': 'Trial patient limit reached. Activate a license first.',
+            }));
+            request.response.close();
+            return;
+          }
           _lastPatientName = patient.fullName;
           notifyListeners();
           request.response.statusCode = 201;

@@ -5,6 +5,7 @@ import '../../core/auth/auth_provider.dart';
 import '../../core/auth/biometric_auth.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/validators.dart';
+import '../../shared/widgets/luxury_figures.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -109,94 +110,116 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.medical_services, size: 80, color: AppTheme.primaryColor),
-                  const SizedBox(height: 16),
-                  const Text('MediRecord',
-                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
-                  const SizedBox(height: 8),
-                  Text(
-                    _isLogin ? 'Sign in to your account' : 'Create a new account',
-                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-                  ),
-                  const SizedBox(height: 40),
-                  if (!_isLogin)
-                    TextFormField(
-                      controller: _nameController,
-                      decoration: const InputDecoration(labelText: 'Full Name', prefixIcon: Icon(Icons.person)),
-                      validator: (v) => Validators.required(v, 'Name'),
-                    ),
-                  if (!_isLogin) const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email)),
-                    keyboardType: TextInputType.emailAddress,
-                    validator: Validators.email,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _passwordController,
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: const Icon(Icons.lock),
-                      suffixIcon: IconButton(
-                        icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
-                        onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                      ),
-                    ),
-                    obscureText: _obscurePassword,
-                    validator: Validators.password,
-                  ),
-                  if (!_isLogin) ...[
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedRole,
-                      decoration: const InputDecoration(
-                        labelText: 'Role',
-                        prefixIcon: Icon(Icons.badge),
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'admin', child: Text('Admin')),
-                        DropdownMenuItem(value: 'doctor', child: Text('Doctor')),
-                        DropdownMenuItem(value: 'nurse', child: Text('Nurse')),
+      body: LuxNavyBackdrop(
+        showBack: Navigator.canPop(context),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const LuxBrandHeader(
+              title: 'MediRecord',
+              tagline: 'PATIENT MEDICAL RECORDS SYSTEM',
+            ),
+            const SizedBox(height: 36),
+            LuxuryCard(
+              ornaments: true,
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.verified_user, size: 20, color: AppTheme.goldDeep),
+                        const SizedBox(width: 8),
+                        Text(
+                          _isLogin ? 'Sign in to your account' : 'Create a new account',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.navy,
+                          ),
+                        ),
                       ],
-                      onChanged: (v) => setState(() => _selectedRole = v!),
                     ),
-                  ],
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
+                    const SizedBox(height: 18),
+                    if (!_isLogin)
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(labelText: 'Full Name', prefixIcon: Icon(Icons.person)),
+                        validator: (v) => Validators.required(v, 'Name'),
+                      ),
+                    if (!_isLogin) const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _emailController,
+                      decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email)),
+                      keyboardType: TextInputType.emailAddress,
+                      validator: Validators.email,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _passwordController,
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: const Icon(Icons.lock),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
+                          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                        ),
+                      ),
+                      obscureText: _obscurePassword,
+                      validator: Validators.password,
+                    ),
+                    if (!_isLogin) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedRole,
+                        decoration: const InputDecoration(
+                          labelText: 'Role',
+                          prefixIcon: Icon(Icons.badge),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'admin', child: Text('Admin')),
+                          DropdownMenuItem(value: 'doctor', child: Text('Doctor')),
+                          DropdownMenuItem(value: 'nurse', child: Text('Nurse')),
+                        ],
+                        onChanged: (v) => setState(() => _selectedRole = v!),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    GoldButton(
                       onPressed: _isLoading ? null : _submit,
                       child: _isLoading
-                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : Text(_isLogin ? 'Sign In' : 'Create Account'),
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.navyDeep),
+                            )
+                          : Text(
+                              _isLogin ? 'Sign In' : 'Create Account',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.navyDeep,
+                                fontSize: 14.5,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: () => setState(() {
-                      _isLogin = !_isLogin;
-                      _formKey.currentState?.reset();
-                    }),
-                    child: Text(
-                      _isLogin ? "Don't have an account? Sign Up" : 'Already have an account? Sign In',
-                      style: const TextStyle(color: AppTheme.primaryColor),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () => setState(() {
+                        _isLogin = !_isLogin;
+                        _formKey.currentState?.reset();
+                      }),
+                      child: Text(
+                        _isLogin ? "Don't have an account? Sign Up" : 'Already have an account? Sign In',
+                        style: const TextStyle(color: AppTheme.goldDeep, fontWeight: FontWeight.w600),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );

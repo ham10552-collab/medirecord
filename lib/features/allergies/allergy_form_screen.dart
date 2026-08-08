@@ -7,6 +7,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
 import '../../shared/models/allergy.dart';
 import '../patients/patient_provider.dart';
+import '../../shared/widgets/pending_items_list.dart';
+import '../../shared/widgets/luxury_figures.dart';
 
 class AllergyFormScreen extends ConsumerStatefulWidget {
   final String patientId;
@@ -152,9 +154,36 @@ class _AllergyFormScreenState extends ConsumerState<AllergyFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_addedItems.isEmpty ? 'Add Allergies' : 'Allergies (${_addedItems.length})')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const MedicalCrossFigure(size: 16),
+            const SizedBox(width: 10),
+            Text(_addedItems.isEmpty ? 'Add Allergies' : 'Allergies (${_addedItems.length})'),
+          ],
+        ),
+      ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const SparkleFigure(size: 12),
+                    const SizedBox(width: 8),
+                    Text('Allergy Profile', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
+                    const Spacer(),
+                    const SparkleFigure(size: 9),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const GoldDivider(),
+              ],
+            ),
+          ),
           if (_addedItems.isNotEmpty) ...[
             Container(
               width: double.infinity,
@@ -175,24 +204,21 @@ class _AllergyFormScreenState extends ConsumerState<AllergyFormScreen> {
                 ],
               ),
             ),
-            SizedBox(
-              height: 64,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                itemCount: _addedItems.length,
-                itemBuilder: (context, i) {
-                  final item = _addedItems[i];
-                  return Chip(
-                    avatar: Icon(Icons.warning_amber, size: 14,
-                        color: item['severity'] == 'severe' ? AppTheme.errorColor : item['severity'] == 'moderate' ? Colors.orange : AppTheme.successColor),
-                    label: Text(item['allergen'] as String, style: const TextStyle(fontSize: 12)),
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () => _removeItem(i),
-                    backgroundColor: AppTheme.successColor.withValues(alpha: 0.1),
-                  );
-                },
-              ),
+            PendingItemsList(
+              itemCount: _addedItems.length,
+              iconBuilder: (_) => Icons.warning_amber,
+              iconColorBuilder: (i) {
+                final severity = _addedItems[i]['severity'] as String?;
+                if (severity == 'severe') return AppTheme.errorColor;
+                if (severity == 'moderate') return Colors.orange;
+                return AppTheme.successColor;
+              },
+              labelBuilder: (i) => _addedItems[i]['allergen'] as String,
+              subtitleBuilder: (i) {
+                final reaction = _addedItems[i]['reaction'] as String?;
+                return reaction != null && reaction.isNotEmpty ? 'Reaction: $reaction' : null;
+              },
+              onRemove: _removeItem,
             ),
             const Divider(height: 1),
           ],

@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/license_provider.dart';
+import '../../core/license/license_manager.dart';
 import '../../core/utils/app_storage.dart';
+import '../../shared/widgets/luxury_figures.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -22,8 +24,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
   Future<void> _check() async {
     try {
-      final licensed = await AppStorage.read('medirecord_licensed');
-      if (licensed == 'true') {
+      final licensed = await LicenseManager.isLicensedOnDevice();
+      if (licensed) {
         ref.read(licenseStatusProvider.notifier).state = LicenseStatus.licensed;
         final role = await AppStorage.read('medirecord_role');
         if (mounted) {
@@ -55,15 +57,32 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
+      body: LuxNavyBackdrop(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.medical_services, size: 72, color: AppTheme.primaryColor),
-            const SizedBox(height: 16),
-            const Text('MediRecord', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            const CircularProgressIndicator(),
+            const LuxBrandHeader(
+              title: 'MediRecord',
+              tagline: 'PATIENT MEDICAL RECORDS SYSTEM',
+            ),
+            const SizedBox(height: 60),
+            const SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: AppTheme.goldColor,
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'Loading your clinic\u2026',
+              style: TextStyle(
+                color: AppTheme.champagneLight,
+                fontSize: 12.5,
+                letterSpacing: 1.2,
+              ),
+            ),
           ],
         ),
       ),

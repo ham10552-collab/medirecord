@@ -65,4 +65,13 @@ class PlatformHelper {
     final filePath = p.join(dir.path, fileName);
     await File(filePath).writeAsBytes(bytes);
   }
+
+  static Future<void> openWhatsApp(String number, String message) async {
+    final digits = number.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return;
+    final url = 'https://wa.me/$digits?text=${Uri.encodeComponent(message)}';
+    try {
+      await Process.run('cmd', ['/c', 'start', '', url]);
+    } catch (_) {}
+  }
 }

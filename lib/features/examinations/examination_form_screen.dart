@@ -3,11 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/database/database_provider.dart';
 import '../../core/utils/constants.dart';
 import '../../shared/models/examination.dart';
+import '../../shared/widgets/pending_items_list.dart';
+import '../../shared/widgets/luxury_figures.dart';
 import '../patients/patient_provider.dart';
 
 class ExaminationFormScreen extends ConsumerStatefulWidget {
@@ -54,6 +57,9 @@ class _ExaminationFormScreenState extends ConsumerState<ExaminationFormScreen> {
     super.initState();
     _filtered = List.from(AppConstants.commonExaminations);
     _searchCtrl.addListener(_filter);
+    final user = ref.read(currentUserProvider);
+    final name = user?.displayName?.trim() ?? '';
+    if (name.isNotEmpty) _doctorCtrl.text = name;
   }
 
   void _filter() {
@@ -84,14 +90,14 @@ class _ExaminationFormScreenState extends ConsumerState<ExaminationFormScreen> {
   }
 
   void _addToLocal() {
-    if (_doctorCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Doctor name is required')));
-      return;
+    var doctorName = _doctorCtrl.text.trim();
+    if (doctorName.isEmpty) {
+      doctorName = ref.read(currentUserProvider)?.displayName?.trim() ?? '';
     }
     setState(() {
       _addedItems.add({
         'visit_date': _visitDate.toIso8601String().split('T')[0],
-        'doctor_name': _doctorCtrl.text.trim(),
+        'doctor_name': doctorName,
         'chief_complaint': _complaintCtrl.text.trim().isEmpty ? null : _complaintCtrl.text.trim(),
         'blood_pressure_systolic': int.tryParse(_bpSystolicCtrl.text),
         'blood_pressure_diastolic': int.tryParse(_bpDiastolicCtrl.text),
@@ -144,9 +150,38 @@ class _ExaminationFormScreenState extends ConsumerState<ExaminationFormScreen> {
     setState(() => _addedItems.removeAt(index));
   }
 
+  bool _hasFormContent() {
+    return _complaintCtrl.text.trim().isNotEmpty ||
+        _diagnosisCtrl.text.trim().isNotEmpty ||
+        _planCtrl.text.trim().isNotEmpty ||
+        _notesCtrl.text.trim().isNotEmpty ||
+        _generalCtrl.text.trim().isNotEmpty ||
+        _headNeckCtrl.text.trim().isNotEmpty ||
+        _chestCtrl.text.trim().isNotEmpty ||
+        _abdomenCtrl.text.trim().isNotEmpty ||
+        _cvsCtrl.text.trim().isNotEmpty ||
+        _cnsCtrl.text.trim().isNotEmpty ||
+        _musculoCtrl.text.trim().isNotEmpty ||
+        _skinCtrl.text.trim().isNotEmpty ||
+        _bpSystolicCtrl.text.isNotEmpty ||
+        _bpDiastolicCtrl.text.isNotEmpty ||
+        _heartRateCtrl.text.isNotEmpty ||
+        _tempCtrl.text.isNotEmpty ||
+        _rrCtrl.text.isNotEmpty ||
+        _spo2Ctrl.text.isNotEmpty ||
+        _heightCtrl.text.isNotEmpty ||
+        _weightCtrl.text.isNotEmpty ||
+        _doctorCtrl.text.trim().isNotEmpty;
+  }
+
   Future<void> _saveAll() async {
-    if (_doctorCtrl.text.trim().isNotEmpty) _addToLocal();
-    if (_addedItems.isEmpty) return;
+    if (_addedItems.isEmpty && _hasFormContent()) _addToLocal();
+    if (_addedItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nothing to save - fill at least one field')),
+      );
+      return;
+    }
 
     setState(() => _isSaving = true);
     try {
@@ -232,9 +267,36 @@ class _ExaminationFormScreenState extends ConsumerState<ExaminationFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_addedItems.isEmpty ? 'New Examinations' : 'Exams (${_addedItems.length})')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const MedicalCrossFigure(size: 16),
+            const SizedBox(width: 10),
+            Text(_addedItems.isEmpty ? 'New Examinations' : 'Exams (${_addedItems.length})'),
+          ],
+        ),
+      ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const SparkleFigure(size: 12),
+                    const SizedBox(width: 8),
+                    Text('Clinical Examination', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
+                    const Spacer(),
+                    const SparkleFigure(size: 9),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const GoldDivider(),
+              ],
+            ),
+          ),
           if (_addedItems.isNotEmpty) ...[
             Container(
               width: double.infinity,
@@ -255,23 +317,11 @@ class _ExaminationFormScreenState extends ConsumerState<ExaminationFormScreen> {
                 ],
               ),
             ),
-            SizedBox(
-              height: 64,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                itemCount: _addedItems.length,
-                itemBuilder: (context, i) {
-                  final item = _addedItems[i];
-                  return Chip(
-                    avatar: Icon(Icons.medical_services, size: 14, color: AppTheme.primaryColor),
-                    label: Text('${item['doctor_name']}  ${item['visit_date']}', style: const TextStyle(fontSize: 11)),
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () => _removeItem(i),
-                    backgroundColor: AppTheme.successColor.withValues(alpha: 0.1),
-                  );
-                },
-              ),
+            PendingItemsList(
+              itemCount: _addedItems.length,
+              iconBuilder: (_) => Icons.medical_services,
+              labelBuilder: (i) => '${_addedItems[i]['doctor_name']}  ${_addedItems[i]['visit_date']}',
+              onRemove: _removeItem,
             ),
             const Divider(height: 1),
           ],
@@ -281,7 +331,13 @@ class _ExaminationFormScreenState extends ConsumerState<ExaminationFormScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Quick Select Template', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  const Row(
+                    children: [
+                      SparkleFigure(size: 11),
+                      SizedBox(width: 8),
+                      Text('Quick Select Template', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: AppTheme.displayFont)),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _searchCtrl,
@@ -315,7 +371,7 @@ class _ExaminationFormScreenState extends ConsumerState<ExaminationFormScreen> {
                   const SizedBox(height: 8),
                   TextFormField(
                     controller: _doctorCtrl,
-                    decoration: const InputDecoration(labelText: 'Doctor Name', prefixIcon: Icon(Icons.person)),
+                    decoration: const InputDecoration(labelText: 'Doctor Name (auto-filled)', prefixIcon: Icon(Icons.person)),
                   ),
                   const SizedBox(height: 12),
                   InkWell(
@@ -335,7 +391,13 @@ class _ExaminationFormScreenState extends ConsumerState<ExaminationFormScreen> {
                     maxLines: 2,
                   ),
                   const SizedBox(height: 20),
-                  const Text('Vital Signs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                  const Row(
+                    children: [
+                      SparkleFigure(size: 13),
+                      SizedBox(width: 8),
+                      Text('Vital Signs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, fontFamily: AppTheme.displayFont)),
+                    ],
+                  ),
                   const SizedBox(height: 12),
                   Row(
                     children: [

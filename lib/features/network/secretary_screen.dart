@@ -1,12 +1,18 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
+import 'package:file_selector/file_selector.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/constants.dart';
 import '../../core/utils/app_storage.dart';
 import '../../core/network/patient_client.dart';
+import '../../core/database/database_helper.dart';
 import '../../shared/models/patient.dart';
+import '../../shared/widgets/patient_card.dart';
+import '../../shared/widgets/luxury_figures.dart';
 
 class SecretaryScreen extends ConsumerStatefulWidget {
   const SecretaryScreen({super.key});
@@ -27,16 +33,27 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
   String? _bloodGroup;
   final _ipCtrl = TextEditingController();
   final _portCtrl = TextEditingController();
+  final _searchReturningCtrl = TextEditingController();
 
   bool _connected = false;
   bool _checking = false;
   bool _sending = false;
   String _statusMsg = '';
+  bool _isFollowUp = false;
+  Patient? _selectedReturningPatient;
+
+  List<Patient> _localPatients = [];
+  List<Patient> _filteredPatients = [];
+  List<Patient> _returningSearchResults = [];
+  bool _loadingPatients = true;
+  String _searchQuery = '';
+  bool _showForm = true;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _loadPatients();
   }
 
   Future<void> _loadSettings() async {
@@ -72,16 +89,69 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
     if (_connected) await _saveSettings();
   }
 
-  Future<void> _sendPatient() async {
-    final ip = _ipCtrl.text.trim();
-    final port = int.tryParse(_portCtrl.text.trim()) ?? 9876;
-    if (ip.isEmpty) {
-      setState(() => _statusMsg = 'Enter doctor IP address first');
-      return;
+  Future<void> _loadPatients() async {
+    if (!mounted) return;
+    setState(() => _loadingPatients = true);
+    try {
+      final patients = await DatabaseHelper().getAllPatients();
+      if (!mounted) return;
+      setState(() {
+        _localPatients = patients;
+        _filteredPatients = _searchQuery.isEmpty ? List.from(patients) : _filteredPatients;
+        _loadingPatients = false;
+      });
+      if (_searchQuery.isNotEmpty) _onSearchChanged(_searchQuery);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingPatients = false);
     }
+  }
 
-    setState(() { _sending = true; _statusMsg = ''; });
+  void _onSearchChanged(String value) {
+    if (!mounted) return;
+    final q = value.toLowerCase();
+    setState(() {
+      _searchQuery = value;
+      _filteredPatients = q.isEmpty
+          ? List.from(_localPatients)
+          : _localPatients.where((p) =>
+              p.firstName.toLowerCase().contains(q) ||
+              p.lastName.toLowerCase().contains(q) ||
+              (p.phone?.toLowerCase().contains(q) ?? false)).toList();
+    });
+  }
 
+  void _onReturningSearchChanged(String value) {
+    final q = value.toLowerCase();
+    setState(() {
+      _returningSearchResults = q.isEmpty
+          ? []
+          : _localPatients.where((p) =>
+              p.firstName.toLowerCase().contains(q) ||
+              p.lastName.toLowerCase().contains(q) ||
+              (p.phone?.toLowerCase().contains(q) ?? false)).take(10).toList();
+    });
+  }
+
+  void _selectReturningPatient(Patient patient) {
+    setState(() {
+      _selectedReturningPatient = patient;
+      _firstName = patient.firstName;
+      _lastName = patient.lastName;
+      _phone = patient.phone ?? '';
+      _address = patient.address ?? '';
+      _emergencyName = patient.emergencyContactName ?? '';
+      _emergencyPhone = patient.emergencyContactPhone ?? '';
+      _age = patient.age.toString();
+      _gender = patient.gender;
+      _bloodGroup = patient.bloodGroup;
+      _isFollowUp = true;
+      _returningSearchResults = [];
+      _searchReturningCtrl.text = '${patient.fullName} (${patient.phone ?? patient.age.toString()})';
+    });
+  }
+
+  Future<void> _savePatientLocally() async {
     final patient = Patient(
       id: const Uuid().v4(),
       firstName: _firstName.trim().isEmpty ? 'Unknown' : _firstName.trim(),
@@ -99,7 +169,109 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
       updatedAt: DateTime.now().toIso8601String(),
     );
 
-    final result = await PatientClient.sendPatient(patient.toMap(), ip, port);
+    final inserted = await DatabaseHelper().insertPatient(patient);
+    if (inserted == 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Trial limit reached (70 patients). Activate a license to continue.'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+      return;
+    }
+    await _loadPatients();
+    _clearForm();
+
+    if (!mounted) return;
+
+    final dir = await getDirectoryPath(
+      confirmButtonText: 'Save Here',
+    );
+
+    if (dir != null) {
+      try {
+        final fileName = '${patient.fullName.replaceAll(' ', '_')}_${patient.id.substring(0, 8)}.json';
+        final filePath = '$dir\\$fileName';
+        await File(filePath).writeAsString(const JsonEncoder.withIndent('  ').convert(patient.toMap()));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Patient saved to $filePath')),
+          );
+          return;
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not save file: $e'), backgroundColor: AppTheme.errorColor),
+          );
+        }
+        return;
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Patient saved locally'), backgroundColor: Colors.green),
+      );
+    }
+  }
+
+  void _clearForm() {
+    setState(() {
+      _firstName = '';
+      _lastName = '';
+      _phone = '';
+      _address = '';
+      _emergencyName = '';
+      _emergencyPhone = '';
+      _age = '';
+      _gender = 'Male';
+      _bloodGroup = null;
+      _isFollowUp = false;
+      _selectedReturningPatient = null;
+      _searchReturningCtrl.text = '';
+      _returningSearchResults = [];
+    });
+  }
+
+  Map<String, dynamic> _buildPatientData() {
+    final patient = Patient(
+      id: const Uuid().v4(),
+      firstName: _firstName.trim().isEmpty ? 'Unknown' : _firstName.trim(),
+      lastName: _lastName.trim().isEmpty ? '' : _lastName.trim(),
+      age: int.tryParse(_age) ?? 0,
+      gender: _gender,
+      phone: _phone.trim().isEmpty ? null : _phone.trim(),
+      address: _address.trim().isEmpty ? null : _address.trim(),
+      bloodGroup: _bloodGroup,
+      emergencyContactName: _emergencyName.trim().isEmpty ? null : _emergencyName.trim(),
+      emergencyContactPhone: _emergencyPhone.trim().isEmpty ? null : _emergencyPhone.trim(),
+      photoUrl: null,
+      createdBy: 'secretary',
+      createdAt: DateTime.now().toIso8601String(),
+      updatedAt: DateTime.now().toIso8601String(),
+    );
+    final data = patient.toMap();
+    data['visit_type'] = _isFollowUp ? 'follow_up' : 'first_visit';
+    if (_selectedReturningPatient != null) {
+      data['original_patient_id'] = _selectedReturningPatient!.id;
+    }
+    return data;
+  }
+
+  Future<void> _sendPatient() async {
+    final ip = _ipCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text.trim()) ?? 9876;
+    if (ip.isEmpty) {
+      setState(() => _statusMsg = 'Enter doctor IP address first');
+      return;
+    }
+
+    setState(() { _sending = true; _statusMsg = ''; });
+    final data = _buildPatientData();
+    final result = await PatientClient.sendPatient(data, ip, port);
     if (!mounted) return;
     setState(() {
       _sending = false;
@@ -107,17 +279,39 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
     });
 
     if (result['status'] == 'ok') {
-      setState(() {
-        _firstName = '';
-        _lastName = '';
-        _phone = '';
-        _address = '';
-        _emergencyName = '';
-        _emergencyPhone = '';
-        _age = '';
-        _gender = 'Male';
-        _bloodGroup = null;
-      });
+      _clearForm();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Patient sent to doctor'), backgroundColor: Colors.green),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendExistingPatient(Patient patient) async {
+    final ip = _ipCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text.trim()) ?? 9876;
+    if (ip.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Connect to doctor first'), backgroundColor: Colors.orange),
+        );
+      }
+      return;
+    }
+
+    final data = patient.toMap();
+    data['visit_type'] = 'follow_up';
+    final result = await PatientClient.sendPatient(data, ip, port);
+    if (!mounted) return;
+    if (result['status'] == 'ok') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${patient.fullName} sent as follow-up'), backgroundColor: Colors.green),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed: ${result['message']}'), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -132,157 +326,514 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MediRecord - Secretary'),
+        title: const Row(
+          children: [
+            MedicalCrossFigure(size: 16),
+            SizedBox(width: 10),
+            Text('MediRecord - Secretary'),
+          ],
+        ),
         actions: [
           IconButton(
-            icon: Icon(_connected ? Icons.wifi : Icons.wifi_off, color: _connected ? Colors.green : Colors.red),
+            icon: Icon(_connected ? Icons.wifi : Icons.wifi_off,
+                color: _connected ? Colors.green : Colors.red),
             tooltip: _connected ? 'Connected' : 'Disconnected',
             onPressed: _testConnection,
+          ),
+          IconButton(
+            icon: Icon(_showForm ? Icons.list : Icons.add),
+            tooltip: _showForm ? 'View Patients' : 'Add Patient',
+            onPressed: () => setState(() => _showForm = !_showForm),
+          ),
+          IconButton(
+            icon: const Icon(Icons.calendar_month),
+            tooltip: 'Bookings',
+            onPressed: () => context.push('/bookings'),
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
             tooltip: 'Logout',
             onPressed: () async {
+              // Logout = switch role only. The device license stays bound.
               await AppStorage.delete('medirecord_role');
-              await AppStorage.delete('medirecord_licensed');
-              await AppStorage.delete('medirecord_trial');
-              if (context.mounted) context.go('/splash');
+              if (context.mounted) context.go('/role');
             },
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Doctor Connection', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Row(
+      body: _showForm ? _buildForm() : _buildPatientList(),
+    );
+  }
+
+  Widget _buildPatientList() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  SparkleFigure(size: 12),
+                  SizedBox(width: 8),
+                  Text('Patient Records', style: TextStyle(fontSize: 18, fontFamily: AppTheme.displayFont, fontWeight: FontWeight.w700)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                onChanged: _onSearchChanged,
+                decoration: InputDecoration(
+                  hintText: 'Search patients...',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(icon: const Icon(Icons.clear), onPressed: () => _onSearchChanged(''))
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _loadingPatients
+              ? const Center(child: CircularProgressIndicator())
+              : _filteredPatients.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const MedicalCrossFigure(size: 30, gold: false),
+                          const SizedBox(height: 16),
+                          const SparkleFigure(size: 12),
+                          const SizedBox(height: 12),
+                          Text(
+                            _searchQuery.isEmpty ? 'No patients yet' : 'No patients match',
+                            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+                          ),
+                          const SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            onPressed: () => setState(() => _showForm = true),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add Patient'),
+                          ),
+                        ],
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _loadPatients,
+                      child: ListView.builder(
+                        itemCount: _filteredPatients.length,
+                        itemBuilder: (context, i) {
+                          final patient = _filteredPatients[i];
+                          return PatientCard(
+                            patient: patient,
+                            onTap: () => _showPatientDetail(patient),
+                          );
+                        },
+                      ),
+                    ),
+        ),
+      ],
+    );
+  }
+
+  void _showPatientDetail(Patient patient) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (ctx, scrollController) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            controller: scrollController,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: AppTheme.primaryColor,
+                    child: Text(
+                      '${patient.firstName[0]}${patient.lastName.isNotEmpty ? patient.lastName[0] : ''}',
+                      style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _ipCtrl,
-                            decoration: const InputDecoration(labelText: 'Doctor IP', hintText: '192.168.1.5', isDense: true),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: 80,
-                          child: TextField(
-                            controller: _portCtrl,
-                            decoration: const InputDecoration(labelText: 'Port', isDense: true),
-                            keyboardType: TextInputType.number,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: _checking
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(Icons.wifi_find),
-                          tooltip: 'Test connection',
-                          onPressed: _checking ? null : _testConnection,
-                        ),
+                        Text(patient.fullName,
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        Text('${patient.age} yrs | ${patient.gender}',
+                            style: const TextStyle(color: AppTheme.textSecondary)),
                       ],
                     ),
-                    if (_statusMsg.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(_statusMsg,
-                            style: TextStyle(fontSize: 12, color: _connected ? Colors.green : Colors.red)),
+                  ),
+                  if (_connected)
+                    IconButton(
+                      icon: const Icon(Icons.send, color: Colors.green),
+                      tooltip: 'Send to doctor',
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _sendExistingPatient(patient);
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (patient.phone != null) ...[
+                _detailRow(Icons.phone, 'Phone', patient.phone!),
+                const SizedBox(height: 8),
+              ],
+              if (patient.address != null) ...[
+                _detailRow(Icons.location_on, 'Address', patient.address!),
+                const SizedBox(height: 8),
+              ],
+              if (patient.bloodGroup != null) ...[
+                _detailRow(Icons.bloodtype, 'Blood Group', patient.bloodGroup!),
+                const SizedBox(height: 8),
+              ],
+              if (patient.emergencyContactName != null) ...[
+                _detailRow(Icons.emergency, 'Emergency Contact', patient.emergencyContactName!),
+                const SizedBox(height: 8),
+              ],
+              if (patient.emergencyContactPhone != null) ...[
+                _detailRow(Icons.phone_in_talk, 'Emergency Phone', patient.emergencyContactPhone!),
+                const SizedBox(height: 8),
+              ],
+              const SizedBox(height: 8),
+              Text('ID: ${patient.id}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              Text('Created: ${patient.createdAt.substring(0, 10)}',
+                  style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _detailRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppTheme.primaryColor),
+        const SizedBox(width: 8),
+        Text('$label: ', style: const TextStyle(fontWeight: FontWeight.w500)),
+        Expanded(child: Text(value)),
+      ],
+    );
+  }
+
+  Widget _buildForm() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Doctor Connection', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _ipCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'Doctor IP', hintText: '192.168.1.5', isDense: true),
+                        ),
                       ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 80,
+                        child: TextField(
+                          controller: _portCtrl,
+                          decoration: const InputDecoration(labelText: 'Port', isDense: true),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: _checking
+                            ? const SizedBox(width: 20, height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.wifi_find),
+                        tooltip: 'Test connection',
+                        onPressed: _checking ? null : _testConnection,
+                      ),
+                    ],
+                  ),
+                  if (_statusMsg.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(_statusMsg,
+                          style: TextStyle(fontSize: 12,
+                              color: _connected ? Colors.green : Colors.red)),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Returning Patient', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _searchReturningCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Search existing patient...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _selectedReturningPatient != null
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: _clearForm,
+                            )
+                          : null,
+                    ),
+                    onChanged: _onReturningSearchChanged,
+                  ),
+                  if (_returningSearchResults.isNotEmpty)
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: _returningSearchResults.map((p) => ListTile(
+                          dense: true,
+                          leading: CircleAvatar(
+                            radius: 16,
+                            child: Text('${p.firstName[0]}${p.lastName.isNotEmpty ? p.lastName[0] : ''}',
+                                style: const TextStyle(fontSize: 11, color: Colors.white)),
+                          ),
+                          title: Text(p.fullName, style: const TextStyle(fontSize: 13)),
+                          subtitle: Text('${p.age} yrs | ${p.gender}${p.phone != null ? ' | ${p.phone}' : ''}',
+                              style: const TextStyle(fontSize: 11)),
+                          onTap: () => _selectReturningPatient(p),
+                        )).toList(),
+                      ),
+                    ),
+                  if (_isFollowUp)
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.repeat, size: 16, color: Colors.orange.shade700),
+                          const SizedBox(width: 8),
+                          Text('Follow-up visit', style: TextStyle(color: Colors.orange.shade800, fontWeight: FontWeight.w500)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: ChoiceChip(
+                  label: const Text('First Visit'),
+                  selected: !_isFollowUp,
+                  onSelected: (_) => setState(() => _isFollowUp = false),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ChoiceChip(
+                  label: const Text('Follow-up'),
+                  selected: _isFollowUp,
+                  selectedColor: Colors.orange.shade100,
+                  onSelected: (_) => setState(() => _isFollowUp = true),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text('Patient Information',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: TextField(
+                decoration: const InputDecoration(
+                    labelText: 'First Name', prefixIcon: Icon(Icons.person)),
+                onChanged: (v) => _firstName = v,
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: TextField(
+                decoration: const InputDecoration(labelText: 'Last Name'),
+                onChanged: (v) => _lastName = v,
+              )),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: TextField(
+                decoration: const InputDecoration(
+                    labelText: 'Age', prefixIcon: Icon(Icons.cake)),
+                keyboardType: TextInputType.number,
+                onChanged: (v) => _age = v,
+              )),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Row(
+                  children: [
+                    _genderButton('Male'),
+                    const SizedBox(width: 8),
+                    _genderButton('Female'),
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text('Patient Information', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(child: TextField(
-                  decoration: const InputDecoration(labelText: 'First Name', prefixIcon: Icon(Icons.person)),
-                  onChanged: (v) => _firstName = v,
-                )),
-                const SizedBox(width: 8),
-                Expanded(child: TextField(
-                  decoration: const InputDecoration(labelText: 'Last Name'),
-                  onChanged: (v) => _lastName = v,
-                )),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(child: TextField(
-                  decoration: const InputDecoration(labelText: 'Age', prefixIcon: Icon(Icons.cake)),
-                  keyboardType: TextInputType.number,
-                  onChanged: (v) => _age = v,
-                )),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _gender,
-                    decoration: const InputDecoration(labelText: 'Gender', prefixIcon: Icon(Icons.wc)),
-                    items: AppConstants.genders.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
-                    onChanged: (v) => setState(() => _gender = v!),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            decoration: const InputDecoration(
+                labelText: 'Phone', prefixIcon: Icon(Icons.phone)),
+            keyboardType: TextInputType.phone,
+            onChanged: (v) => _phone = v,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            decoration: const InputDecoration(
+                labelText: 'Address', prefixIcon: Icon(Icons.location_on)),
+            maxLines: 2,
+            onChanged: (v) => _address = v,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String?>(
+            initialValue: _bloodGroup,
+            decoration: const InputDecoration(
+                labelText: 'Blood Group', prefixIcon: Icon(Icons.bloodtype)),
+            items: AppConstants.bloodGroups
+                .map((b) => DropdownMenuItem(value: b, child: Text(b)))
+                .toList(),
+            onChanged: (v) => setState(() => _bloodGroup = v),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            decoration: const InputDecoration(
+                labelText: 'Emergency Contact Name',
+                prefixIcon: Icon(Icons.emergency)),
+            onChanged: (v) => _emergencyName = v,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            decoration: const InputDecoration(labelText: 'Emergency Contact Phone'),
+            keyboardType: TextInputType.phone,
+            onChanged: (v) => _emergencyPhone = v,
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: _savePatientLocally,
+                    icon: const Icon(Icons.save),
+                    label: const Text('Save Locally'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.secondaryColor,
+                      foregroundColor: Colors.white,
+                    ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              decoration: const InputDecoration(labelText: 'Phone', prefixIcon: Icon(Icons.phone)),
-              keyboardType: TextInputType.phone,
-              onChanged: (v) => _phone = v,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              decoration: const InputDecoration(labelText: 'Address', prefixIcon: Icon(Icons.location_on)),
-              maxLines: 2,
-              onChanged: (v) => _address = v,
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String?>(
-              initialValue: _bloodGroup,
-              decoration: const InputDecoration(labelText: 'Blood Group', prefixIcon: Icon(Icons.bloodtype)),
-              items: AppConstants.bloodGroups.map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-              onChanged: (v) => setState(() => _bloodGroup = v),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              decoration: const InputDecoration(labelText: 'Emergency Contact Name', prefixIcon: Icon(Icons.emergency)),
-              onChanged: (v) => _emergencyName = v,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              decoration: const InputDecoration(labelText: 'Emergency Contact Phone'),
-              keyboardType: TextInputType.phone,
-              onChanged: (v) => _emergencyPhone = v,
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton.icon(
-                onPressed: _sending ? null : _sendPatient,
-                icon: _sending
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.send),
-                label: Text(_sending ? 'Sending...' : 'Send to Doctor'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _connected ? AppTheme.primaryColor : Colors.grey,
-                  foregroundColor: Colors.white,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: _sending ? null : _sendPatient,
+                    icon: _sending
+                        ? const SizedBox(width: 20, height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : Icon(_isFollowUp ? Icons.repeat : Icons.send),
+                    label: Text(_sending ? 'Sending...' : (_isFollowUp ? 'Send as Follow-up' : 'Send to Doctor')),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _connected ? (_isFollowUp ? Colors.orange : AppTheme.primaryColor) : Colors.grey,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
                 ),
               ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _genderButton(String gender) {
+    final selected = _gender == gender;
+    final male = gender == 'Male';
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _gender = gender),
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: selected ? AppTheme.goldColor : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? AppTheme.goldDeep : AppTheme.goldColor,
+              width: 1.3,
             ),
-          ],
+            boxShadow: selected
+                ? [BoxShadow(color: AppTheme.goldColor.withValues(alpha: 0.3), blurRadius: 6, offset: const Offset(0, 2))]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                male ? Icons.male : Icons.female,
+                size: 18,
+                color: selected ? AppTheme.navyDeep : AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                gender,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: selected ? AppTheme.navyDeep : AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -7,8 +7,12 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
+import '../../core/utils/arabic_pdf.dart';
+import '../../core/utils/pdf_fonts.dart';
 import '../../core/utils/platform_helper.dart';
 import '../../shared/widgets/vitals_card.dart';
+import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/luxury_figures.dart';
 import '../../shared/models/patient.dart';
 import '../../shared/models/medical_history.dart';
 import '../../shared/models/examination.dart';
@@ -121,38 +125,39 @@ class _PatientDetailContent extends ConsumerWidget {
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(32),
+          theme: await arabicPdfTheme(),
           header: (_) => pw.Header(
             level: 0,
             child: pw.Text('MediRecord - Patient Report',
                 style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
           ),
           build: (_) => [
-            pw.Header(level: 1, text: p.fullName),
-            pw.Paragraph(text: 'Age: ${p.age} years | Gender: ${p.gender}'),
-            pw.Paragraph(text: 'Blood Group: ${p.bloodGroup ?? '-'} | Phone: ${p.phone ?? '-'}'),
-            if (p.address != null) pw.Paragraph(text: 'Address: ${p.address}'),
+            pw.Header(level: 1, text: arabicToPdf(p.fullName)),
+            pw.Paragraph(text: 'Age: ${p.age} years | Gender: ${arabicToPdf(p.gender)}'),
+            pw.Paragraph(text: 'Blood Group: ${arabicToPdf(p.bloodGroup ?? '-')} | Phone: ${arabicToPdf(p.phone ?? '-')}'),
+            if (p.address != null) pw.Paragraph(text: 'Address: ${arabicToPdf(p.address!)}'),
             pw.Divider(),
             if (history.isNotEmpty) ...[
               pw.Header(level: 2, text: 'Medical History'),
               ...history.cast<MedicalHistory>().map((h) => pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Paragraph(text: '${h.conditionName} (${h.status}) - ${h.severity ?? ''}'),
-                  if (h.diagnosisDate != null) pw.Paragraph(text: '  Diagnosed: ${h.diagnosisDate}'),
-                  if (h.notes != null) pw.Paragraph(text: '  Notes: ${h.notes}'),
+                  pw.Paragraph(text: '[${arabicToPdf(historyTypeLabel(h.historyType))}] ${arabicToPdf(h.conditionName)} (${arabicToPdf(h.status)}) - ${arabicToPdf(h.severity ?? '')}'),
+                  if (h.diagnosisDate != null) pw.Paragraph(text: '  Diagnosed: ${arabicToPdf(h.diagnosisDate!)}'),
+                  if (h.notes != null) pw.Paragraph(text: '  Notes: ${arabicToPdf(h.notes!)}'),
                 ],
               )),
             ],
             if (surgeries.isNotEmpty) ...[
               pw.Header(level: 2, text: 'Surgeries'),
               ...surgeries.cast<Map<String, dynamic>>().map((s) => pw.Paragraph(
-                text: '${s['surgery_name']}${s['surgery_date'] != null ? ' (${s['surgery_date']})' : ''}${s['hospital'] != null ? ' @ ${s['hospital']}' : ''}',
+                text: '${arabicToPdf(s['surgery_name'] ?? '')}${s['surgery_date'] != null ? ' (${arabicToPdf('${s['surgery_date']}')})' : ''}${s['hospital'] != null ? ' @ ${arabicToPdf('${s['hospital']}')}' : ''}',
               )),
             ],
             if (allergies.isNotEmpty) ...[
               pw.Header(level: 2, text: 'Allergies'),
               ...allergies.cast<Allergy>().map((a) => pw.Paragraph(
-                text: '${a.allergen} (${a.severity})${a.reaction != null ? ' - ${a.reaction}' : ''}',
+                text: '${arabicToPdf(a.allergen)} (${arabicToPdf(a.severity)})${a.reaction != null ? ' - ${arabicToPdf(a.reaction!)}' : ''}',
               )),
             ],
             if (exams.isNotEmpty) ...[
@@ -160,23 +165,23 @@ class _PatientDetailContent extends ConsumerWidget {
               ...exams.cast<Examination>().map((e) => pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Paragraph(text: '${e.visitDate} - Dr. ${e.doctorName}'),
-                  if (e.chiefComplaint != null) pw.Paragraph(text: '  Complaint: ${e.chiefComplaint}'),
-                  if (e.diagnosis != null) pw.Paragraph(text: '  Diagnosis: ${e.diagnosis}'),
-                  if (e.plan != null) pw.Paragraph(text: '  Plan: ${e.plan}'),
+                  pw.Paragraph(text: '${e.visitDate} - Dr. ${arabicToPdf(e.doctorName)}'),
+                  if (e.chiefComplaint != null) pw.Paragraph(text: '  Complaint: ${arabicToPdf(e.chiefComplaint!)}'),
+                  if (e.diagnosis != null) pw.Paragraph(text: '  Diagnosis: ${arabicToPdf(e.diagnosis!)}'),
+                  if (e.plan != null) pw.Paragraph(text: '  Plan: ${arabicToPdf(e.plan!)}'),
                 ],
               )),
             ],
             if (investigations.isNotEmpty) ...[
               pw.Header(level: 2, text: 'Investigations'),
               ...investigations.cast<Investigation>().map((i) => pw.Paragraph(
-                text: '${i.testName}: ${i.result ?? '-'} ${i.unit ?? ''} ${i.isAbnormal ? '(ABNORMAL)' : ''} (${i.investigationDate})',
+                text: '${arabicToPdf(i.testName)}: ${arabicToPdf(i.result ?? '-')} ${arabicToPdf(i.unit ?? '')} ${i.isAbnormal ? '(ABNORMAL)' : ''} (${i.investigationDate})',
               )),
             ],
             if (medications.isNotEmpty) ...[
               pw.Header(level: 2, text: 'Medications'),
               ...medications.cast<Medication>().map((m) => pw.Paragraph(
-                text: '${m.drugName} ${m.dosage} - ${m.frequency} (${m.isActive ? 'Active' : 'Inactive'})',
+                text: '${arabicToPdf(m.drugName)} ${arabicToPdf(m.dosage)} - ${arabicToPdf(m.frequency)} (${m.isActive ? 'Active' : 'Inactive'})',
               )),
             ],
             pw.Divider(),
@@ -217,14 +222,78 @@ class _ProfileTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              gradient: AppTheme.heroGradient,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppTheme.goldLight.withValues(alpha: 0.55), width: 1.2),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.navyDeep.withValues(alpha: 0.4),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Stack(
+              children: [
+                Positioned(
+                  right: -18,
+                  top: -22,
+                  child: Icon(Icons.auto_awesome, size: 70, color: AppTheme.goldColor.withValues(alpha: 0.2)),
+                ),
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: Transform.flip(flipY: true, child: CornerOrnament(size: 24, color: Colors.white.withValues(alpha: 0.5))),
+                ),
+                Positioned(
+                  right: 6,
+                  bottom: 6,
+                  child: CornerOrnament(size: 24, color: Colors.white.withValues(alpha: 0.5)),
+                ),
+                Row(
+                  children: [
+                    const MedicalCrossFigure(size: 22),
+                    const SizedBox(width: 14),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('PATIENT PROFILE', style: TextStyle(
+                          color: AppTheme.goldLight,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.3,
+                        )),
+                        const SizedBox(height: 2),
+                        Text(
+                          patient.fullName,
+                          style: AppTheme.displayStyle(size: 22, color: Colors.white, gold: true),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${patient.age} yrs  •  ${patient.gender}  •  ${patient.bloodGroup ?? 'Unknown blood group'}',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.88), fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          const LuxSectionTitle(title: 'Personal Information', icon: Icons.badge_outlined),
+          const SizedBox(height: 8),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Personal Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const Divider(),
+                  const GoldDivider(),
+                  const SizedBox(height: 12),
                   InfoRow(label: 'Name', value: patient.fullName),
                   InfoRow(label: 'Age', value: patient.age.toString()),
                   InfoRow(label: 'Gender', value: patient.gender),
@@ -237,14 +306,16 @@ class _ProfileTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+          const LuxSectionTitle(title: 'Emergency Contact', icon: Icons.contact_emergency_outlined),
+          const SizedBox(height: 8),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Emergency Contact', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const Divider(),
+                  const GoldDivider(),
+                  const SizedBox(height: 12),
                   InfoRow(label: 'Name', value: patient.emergencyContactName ?? '-'),
                   InfoRow(label: 'Phone', value: patient.emergencyContactPhone ?? '-'),
                 ],
@@ -281,10 +352,28 @@ class InfoRow extends StatelessWidget {
   }
 }
 
+String historyTypeLabel(String type) {
+  return switch (type) {
+    'surgical' => 'Surgical',
+    'allergy' => 'Allergy',
+    'other' => 'Other',
+    _ => 'Medical',
+  };
+}
+
 class _HistoryTab extends ConsumerWidget {
   final String patientId;
 
   const _HistoryTab({required this.patientId});
+
+  IconData _typeIcon(String type) {
+    return switch (type) {
+      'surgical' => Icons.content_cut,
+      'allergy' => Icons.warning_amber,
+      'other' => Icons.more_horiz,
+      _ => Icons.local_hospital,
+    };
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -302,15 +391,37 @@ class _HistoryTab extends ConsumerWidget {
                 child: ElevatedButton.icon(
                   onPressed: () => context.push('/patients/${patientId}/history/add'),
                   icon: const Icon(Icons.add),
-                  label: const Text('Add Medical History'),
+                  label: const Text('Add History'),
                 ),
               );
             }
             final h = history[i - 1];
+            final label = historyTypeLabel(h.historyType);
             return Card(
               child: ListTile(
+                leading: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: label == 'Allergy'
+                        ? AppTheme.errorColor.withValues(alpha: 0.1)
+                        : label == 'Surgical'
+                            ? AppTheme.primaryColor.withValues(alpha: 0.1)
+                            : AppTheme.goldColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    _typeIcon(h.historyType),
+                    color: label == 'Allergy'
+                        ? AppTheme.errorColor
+                        : label == 'Surgical'
+                            ? AppTheme.primaryColor
+                            : AppTheme.goldDeep,
+                    size: 20,
+                  ),
+                ),
                 title: Text(h.conditionName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('${h.status} - ${h.severity ?? ''}'),
+                subtitle: Text('${historyTypeLabel(h.historyType)} - ${h.status}${h.severity != null ? ' - ${h.severity}' : ''}'),
                 trailing: PopupMenuButton(
                   itemBuilder: (_) => [
                     const PopupMenuItem(value: 'edit', child: Text('Edit')),
@@ -357,23 +468,48 @@ class _ExamsTab extends ConsumerWidget {
               return Padding(
                 padding: const EdgeInsets.all(8),
                 child: ElevatedButton.icon(
-                  onPressed: () => context.push('/patients/${patientId}/exams/add'),
+                  onPressed: () => context.push('/patients/${patientId}/examinations/add'),
                   icon: const Icon(Icons.add),
                   label: const Text('Add Examination'),
                 ),
               );
             }
             final e = exams[i - 1];
+            final vitals = <String>[
+              if (e.bp != null) 'BP: ${e.bp}',
+              if (e.heartRate != null) 'HR: ${e.heartRate}',
+              if (e.temperature != null) 'Temp: ${e.temperature}',
+              if (e.respiratoryRate != null) 'RR: ${e.respiratoryRate}',
+              if (e.oxygenSaturation != null) 'SpO2: ${e.oxygenSaturation}',
+              if (e.height != null) 'Ht: ${e.height}',
+              if (e.weight != null) 'Wt: ${e.weight}',
+              if (e.bmi != null) 'BMI: ${e.bmi}',
+            ];
             return Card(
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Dr. ${e.doctorName} - ${e.visitDate}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text(
+                      e.doctorName.trim().isEmpty
+                          ? e.visitDate
+                          : 'Dr. ${e.doctorName} - ${e.visitDate}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     if (e.chiefComplaint != null) Text('Complaint: ${e.chiefComplaint}'),
+                    if (vitals.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 2,
+                        children: vitals.map((v) => Text(v, style: const TextStyle(fontSize: 12, color: AppTheme.goldDeep, fontWeight: FontWeight.w600))).toList(),
+                      ),
+                    ],
                     if (e.diagnosis != null) Text('Diagnosis: ${e.diagnosis}'),
                     if (e.plan != null) Text('Plan: ${e.plan}'),
+                    if (e.notes != null) Text('Notes: ${e.notes}'),
+                    if (e.generalAppearance != null) Text('General: ${e.generalAppearance}'),
                   ],
                 ),
               ),
@@ -384,7 +520,7 @@ class _ExamsTab extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/patients/${patientId}/exams/add'),
+        onPressed: () => context.push('/patients/${patientId}/examinations/add'),
         child: const Icon(Icons.add),
       ),
     );
@@ -479,11 +615,33 @@ class _InvestigationsTab extends ConsumerWidget {
                           child: Row(
                             children: [
                               Expanded(flex: 3, child: Text(r.investigationDate, style: TextStyle(fontSize: 12, fontWeight: r == latest ? FontWeight.w600 : FontWeight.normal))),
-                              Expanded(flex: 3, child: Text(r.result ?? '-', style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: r.isAbnormal ? AppTheme.errorColor : AppTheme.textPrimary,
-                              ))),
+                              Expanded(flex: 3, child: Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(r.result ?? '-', style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.goldDeep,
+                                    )),
+                                  ),
+                                  if (r.isAbnormal) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: Color(0xFFFF5252).withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: const Color(0xFFFF5252), width: 0.8),
+                                      ),
+                                      child: const Text('ABNORMAL', style: TextStyle(
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFFFF5252),
+                                      )),
+                                    ),
+                                  ],
+                                ],
+                              )),
                               Expanded(flex: 3, child: Text(r.normalRange ?? '-', style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary))),
                               SizedBox(
                                 width: 24,
@@ -604,15 +762,73 @@ class _MedicationsTab extends ConsumerWidget {
   }
 }
 
-class _PrescriptionsTab extends ConsumerWidget {
+class _PrescriptionsTab extends ConsumerStatefulWidget {
   final String patientId;
   final Patient patient;
 
   const _PrescriptionsTab({required this.patientId, required this.patient});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final prescriptionsAsync = ref.watch(patientPrescriptionsProvider(patientId));
+  ConsumerState<_PrescriptionsTab> createState() => _PrescriptionsTabState();
+}
+
+class _PrescriptionsTabState extends ConsumerState<_PrescriptionsTab> {
+  String? _patientPhone;
+
+  String get _patientId => widget.patientId;
+  Patient get patient => widget.patient;
+
+  Future<void> _sendPrescriptionWhatsApp(Prescription rx, String phone) async {
+    final items = rx.items
+        .map((item) => '${item.medicineName} - ${item.dosage}${item.frequency.isNotEmpty ? ' ${item.frequency}' : ''}${item.duration.isNotEmpty ? ' (${item.duration})' : ''}')
+        .join('\n');
+    final message = [
+      'MediRecord - Prescription',
+      'Patient: ${patient.fullName}',
+      'Date: ${rx.createdAt.length >= 10 ? rx.createdAt.substring(0, 10) : rx.createdAt}',
+      if (rx.doctorName.isNotEmpty) 'Doctor: ${rx.doctorName}',
+      if (rx.diagnosis.isNotEmpty) '',
+      if (rx.diagnosis.isNotEmpty) 'Diagnosis: ${rx.diagnosis}',
+      '',
+      items,
+      if (rx.notes.isNotEmpty) '',
+      if (rx.notes.isNotEmpty) 'Notes: ${rx.notes}',
+    ].join('\n');
+    await PlatformHelper.openWhatsApp(phone, message);
+  }
+
+  Future<String?> _askPhoneNumber(BuildContext context) {
+    final ctrl = TextEditingController(text: patient.phone ?? '');
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send via WhatsApp'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Patient has no phone number saved. Enter one to send the prescription:'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(labelText: 'Phone number (with country code, e.g. 20...)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prescriptionsAsync = ref.watch(patientPrescriptionsProvider(_patientId));
 
     return Scaffold(
       body: prescriptionsAsync.when(
@@ -624,8 +840,8 @@ class _PrescriptionsTab extends ConsumerWidget {
                 children: [
                   const Text('No prescriptions', style: TextStyle(color: AppTheme.textSecondary)),
                   const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () => context.push('/patients/${patientId}/prescriptions/add'),
+ElevatedButton.icon(
+                    onPressed: () => context.push('/patients/${_patientId}/prescriptions/add'),
                     icon: const Icon(Icons.add),
                     label: const Text('Add Prescription'),
                   ),
@@ -641,7 +857,7 @@ class _PrescriptionsTab extends ConsumerWidget {
                 return Padding(
                   padding: const EdgeInsets.all(8),
                   child: ElevatedButton.icon(
-                    onPressed: () => context.push('/patients/${patientId}/prescriptions/add'),
+                    onPressed: () => context.push('/patients/${_patientId}/prescriptions/add'),
                     icon: const Icon(Icons.add),
                     label: const Text('Add Prescription'),
                   ),
@@ -685,6 +901,19 @@ class _PrescriptionsTab extends ConsumerWidget {
                               if (context.mounted) await printPrescriptionDirect(context, path);
                             },
                           ),
+                          IconButton(
+                            icon: const Icon(Icons.chat, size: 20),
+                            tooltip: 'Send via WhatsApp',
+                            onPressed: _patientPhone == null
+                                ? () async {
+                                    final phone = await _askPhoneNumber(context);
+                                    if (phone != null) {
+                                      setState(() => _patientPhone = phone);
+                                      _sendPrescriptionWhatsApp(rx, phone);
+                                    }
+                                  }
+                                : () => _sendPrescriptionWhatsApp(rx, _patientPhone!),
+                          ),
                         ],
                       ),
                       if (rx.diagnosis.isNotEmpty) ...[
@@ -720,7 +949,7 @@ class _PrescriptionsTab extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/patients/${patientId}/prescriptions/add'),
+        onPressed: () => context.push('/patients/${_patientId}/prescriptions/add'),
         child: const Icon(Icons.add),
       ),
     );

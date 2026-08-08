@@ -5,6 +5,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/database/database_provider.dart';
 import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/luxury_figures.dart';
 
 class UserManagementScreen extends ConsumerStatefulWidget {
   const UserManagementScreen({super.key});
@@ -19,7 +20,15 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     final usersAsync = ref.watch(allUsersProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('User Management')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const MedicalCrossFigure(size: 16),
+            const SizedBox(width: 10),
+            const Text('User Management'),
+          ],
+        ),
+      ),
       drawer: const AppDrawer(),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddUserDialog(context),
@@ -32,41 +41,87 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.people_outline, size: 60, color: Colors.grey),
+                  MedicalCrossFigure(size: 30, gold: false),
                   SizedBox(height: 16),
+                  SparkleFigure(size: 12),
+                  SizedBox(height: 12),
                   Text('No users found', style: TextStyle(color: AppTheme.textSecondary)),
                 ],
               ),
             );
           }
           return ListView.builder(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
             itemCount: users.length,
             itemBuilder: (context, index) {
               final user = users[index];
               final role = user['role'] as String? ?? '';
               final isActive = (user['is_active'] as int?) == 1;
 
-              return Card(
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: _getRoleColor(role).withValues(alpha: 0.1),
-                    child: Icon(Icons.person, color: _getRoleColor(role)),
-                  ),
-                  title: Text(user['display_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w500)),
-                  subtitle: Text('${user['email']}  |  ${role.toUpperCase()}'),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isActive ? AppTheme.successColor.withValues(alpha: 0.2) : Colors.grey.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(4),
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.25), width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.navy.withValues(alpha: 0.06),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
-                    child: Text(
-                      isActive ? 'Active' : 'Inactive',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isActive ? AppTheme.successColor : Colors.grey,
+                  ],
+                ),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  leading: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: AppTheme.goldGradient,
+                    ),
+                    child: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: _getRoleColor(role).withValues(alpha: 0.15),
+                      child: Icon(Icons.person, color: _getRoleColor(role)),
+                    ),
+                  ),
+                  title: Text(
+                    user['display_name'] ?? '',
+                    style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.navy, fontSize: 15),
+                  ),
+                  subtitle: Text(
+                    '${user['email']}  |  ${role.toUpperCase()}',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12.5),
+                  ),
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: isActive ? AppTheme.successColor.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isActive ? AppTheme.successColor.withValues(alpha: 0.5) : Colors.grey.withValues(alpha: 0.4),
+                        width: 1,
                       ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isActive ? Icons.check_circle : Icons.cancel,
+                          size: 14,
+                          color: isActive ? AppTheme.successColor : Colors.grey,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          isActive ? 'Active' : 'Inactive',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: isActive ? AppTheme.successColor : Colors.grey,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

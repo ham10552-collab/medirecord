@@ -9,6 +9,8 @@ import '../../core/database/database_helper.dart';
 import '../../core/utils/constants.dart';
 import '../../core/utils/platform_helper.dart';
 import '../../shared/models/medication.dart';
+import '../../shared/widgets/pending_items_list.dart';
+import '../../shared/widgets/luxury_figures.dart';
 import '../patients/patient_provider.dart';
 
 class MedicationFormScreen extends ConsumerStatefulWidget {
@@ -57,19 +59,37 @@ class _MedicationFormScreenState extends ConsumerState<MedicationFormScreen> {
       if (content != null && content.isNotEmpty) {
         final lines = content.split('\n').where((l) => l.trim().isNotEmpty).toList();
         AppConstants.customDrugs.clear();
-        for (final name in lines) {
-          AppConstants.customDrugs.add({'drug': name.trim(), 'dosage': '', 'frequency': ''});
+        for (final line in lines) {
+          final parts = line.trim().split('|');
+          AppConstants.customDrugs.add({
+            'drug': parts[0].trim(),
+            'dosage': parts.length > 1 ? parts[1].trim() : '',
+            'frequency': parts.length > 2 ? parts[2].trim() : '',
+            'generic': parts.length > 3 ? parts[3].trim() : '',
+          });
         }
         _rebuildFilteredMeds();
       }
     });
   }
 
-  void _saveCustomMed(String name) {
+  void _saveCustomMed(String name, {String dosage = '', String frequency = '', String generic = ''}) {
     if (name.trim().isEmpty) return;
-    if (AppConstants.customDrugs.any((m) => (m['drug'] ?? '').toLowerCase() == name.toLowerCase())) return;
-    AppConstants.customDrugs.add({'drug': name, 'dosage': '', 'frequency': ''});
-    final content = AppConstants.customDrugs.map((m) => m['drug']).join('\n');
+    final index = AppConstants.customDrugs.indexWhere(
+        (m) => (m['drug'] ?? '').toLowerCase() == name.toLowerCase());
+    if (index >= 0) {
+      AppConstants.customDrugs[index] = {
+        'drug': name,
+        'dosage': dosage,
+        'frequency': frequency,
+        'generic': generic,
+      };
+    } else {
+      AppConstants.customDrugs.add({'drug': name, 'dosage': dosage, 'frequency': frequency, 'generic': generic});
+    }
+    final content = AppConstants.customDrugs
+        .map((m) => '${m['drug']}|${m['dosage']}|${m['frequency']}|${m['generic']}')
+        .join('\n');
     PlatformHelper.writeCustomDrugs(content);
     _rebuildFilteredMeds();
   }
@@ -115,7 +135,10 @@ class _MedicationFormScreenState extends ConsumerState<MedicationFormScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter or select a drug name first')));
       return;
     }
-    _saveCustomMed(drugName);
+    _saveCustomMed(drugName,
+        dosage: _dosageCtrl.text.trim(),
+        frequency: _frequencyCtrl.text.trim(),
+        generic: _genericNameCtrl.text.trim());
     setState(() {
       _addedItems.add({
         'drug_name': drugName,
@@ -222,9 +245,36 @@ class _MedicationFormScreenState extends ConsumerState<MedicationFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_addedItems.isEmpty ? 'New Medication' : 'Medications (${_addedItems.length})')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const MedicalCrossFigure(size: 16),
+            const SizedBox(width: 10),
+            Text(_addedItems.isEmpty ? 'New Medication' : 'Medications (${_addedItems.length})'),
+          ],
+        ),
+      ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const SparkleFigure(size: 12),
+                    const SizedBox(width: 8),
+                    Text('Prescribed Medication', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
+                    const Spacer(),
+                    const SparkleFigure(size: 9),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const GoldDivider(),
+              ],
+            ),
+          ),
           if (_addedItems.isNotEmpty) ...[
             Container(
               width: double.infinity,
@@ -245,23 +295,15 @@ class _MedicationFormScreenState extends ConsumerState<MedicationFormScreen> {
                 ],
               ),
             ),
-            SizedBox(
-              height: 64,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                itemCount: _addedItems.length,
-                itemBuilder: (context, i) {
-                  final item = _addedItems[i];
-                  return Chip(
-                    avatar: Icon(Icons.medication, size: 14, color: AppTheme.primaryColor),
-                    label: Text(item['drug_name'] as String, style: const TextStyle(fontSize: 11)),
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () => _removeItem(i),
-                    backgroundColor: AppTheme.successColor.withValues(alpha: 0.1),
-                  );
-                },
-              ),
+            PendingItemsList(
+              itemCount: _addedItems.length,
+              iconBuilder: (_) => Icons.medication,
+              labelBuilder: (i) => _addedItems[i]['drug_name'] as String,
+              subtitleBuilder: (i) => [
+                    _addedItems[i]['dosage'] as String?,
+                    _addedItems[i]['frequency'] as String?,
+                  ].where((s) => (s ?? '').trim().isNotEmpty).join(' | '),
+              onRemove: _removeItem,
             ),
             const Divider(height: 1),
           ],
@@ -271,7 +313,13 @@ class _MedicationFormScreenState extends ConsumerState<MedicationFormScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Quick Select', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  const Row(
+                    children: [
+                      SparkleFigure(size: 11),
+                      SizedBox(width: 8),
+                      Text('Quick Select', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: AppTheme.displayFont)),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _searchCtrl,
@@ -295,7 +343,9 @@ class _MedicationFormScreenState extends ConsumerState<MedicationFormScreen> {
                           dense: true,
                           leading: Icon(Icons.medication, size: 18, color: isCustom ? Colors.orange : AppTheme.primaryColor),
                           title: Text(m['drug'] as String, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: isCustom ? Colors.deepOrange : null)),
-                          subtitle: Text(isCustom ? 'Custom entry' : '${m['form']} | ${m['dosage']}', style: const TextStyle(fontSize: 11)),
+                          subtitle: isCustom
+                              ? Text([m['dosage'], m['frequency']].where((s) => (s ?? '').trim().isNotEmpty).join(' | '), style: const TextStyle(fontSize: 11))
+                              : Text('${m['form']} | ${m['dosage']}', style: const TextStyle(fontSize: 11)),
                           trailing: isCustom ? const Icon(Icons.star, size: 14, color: Colors.orange) : null,
                           onTap: () => _selectMedication(m),
                         );

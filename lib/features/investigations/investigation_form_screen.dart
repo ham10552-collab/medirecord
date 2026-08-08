@@ -11,6 +11,8 @@ import '../../core/database/database_helper.dart';
 import '../../core/utils/constants.dart';
 import '../../core/utils/platform_helper.dart';
 import '../../shared/models/investigation.dart';
+import '../../shared/widgets/pending_items_list.dart';
+import '../../shared/widgets/luxury_figures.dart';
 import '../patients/patient_provider.dart';
 
 class InvestigationFormScreen extends ConsumerStatefulWidget {
@@ -47,6 +49,33 @@ class _InvestigationFormScreenState extends ConsumerState<InvestigationFormScree
     super.initState();
     _filteredTests = List.from(AppConstants.commonInvestigations);
     _searchCtrl.addListener(_filterTests);
+    _testNameCtrl.addListener(_autofillTestInfo);
+  }
+
+  void _autofillTestInfo() {
+    final q = _testNameCtrl.text.trim().toLowerCase();
+    if (q.isEmpty) return;
+    Map<String, dynamic>? match;
+    for (final t in AppConstants.commonInvestigations) {
+      final name = (t['test'] as String).toLowerCase();
+      final nr = ((t['normalRange'] as String?) ?? '').trim();
+      if (name == q || name.startsWith(q) || q.contains(name)) {
+        if (nr.isNotEmpty) {
+          match = t;
+          break;
+        }
+      }
+    }
+    if (match == null) return;
+    final matched = match;
+    setState(() {
+      if (_normalRangeCtrl.text.trim().isEmpty) {
+        _normalRangeCtrl.text = matched['normalRange'] as String;
+      }
+      if (_unitCtrl.text.trim().isEmpty && ((matched['unit'] as String?) ?? '').trim().isNotEmpty) {
+        _unitCtrl.text = matched['unit'] as String;
+      }
+    });
   }
 
   void _filterTests() {
@@ -243,9 +272,36 @@ class _InvestigationFormScreenState extends ConsumerState<InvestigationFormScree
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_addedItems.isEmpty ? 'New Investigations' : 'Investigations (${_addedItems.length})')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const MedicalCrossFigure(size: 16),
+            const SizedBox(width: 10),
+            Text(_addedItems.isEmpty ? 'New Investigations' : 'Investigations (${_addedItems.length})'),
+          ],
+        ),
+      ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const SparkleFigure(size: 12),
+                    const SizedBox(width: 8),
+                    Text('Laboratory & Imaging', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
+                    const Spacer(),
+                    const SparkleFigure(size: 9),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const GoldDivider(),
+              ],
+            ),
+          ),
           if (_addedItems.isNotEmpty) ...[
             Container(
               width: double.infinity,
@@ -266,24 +322,17 @@ class _InvestigationFormScreenState extends ConsumerState<InvestigationFormScree
                 ],
               ),
             ),
-            SizedBox(
-              height: 64,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                itemCount: _addedItems.length,
-                itemBuilder: (context, i) {
-                  final item = _addedItems[i];
-                  return Chip(
-                    avatar: Icon(Icons.science, size: 14, color: AppTheme.primaryColor),
-                    label: Text(item['test_name'] as String, style: const TextStyle(fontSize: 11)),
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () => _removeItem(i),
-                    backgroundColor: AppTheme.successColor.withValues(alpha: 0.1),
-                  );
-                },
-              ),
+            PendingItemsList(
+              itemCount: _addedItems.length,
+              iconBuilder: (_) => Icons.science,
+              labelBuilder: (i) => _addedItems[i]['test_name'] as String,
+              subtitleBuilder: (i) {
+                final result = _addedItems[i]['result'] as String?;
+                return result != null && result.isNotEmpty ? 'Result: $result' : null;
+              },
+              onRemove: _removeItem,
             ),
+            const Divider(height: 1),
             const Divider(height: 1),
           ],
           Expanded(
@@ -292,7 +341,13 @@ class _InvestigationFormScreenState extends ConsumerState<InvestigationFormScree
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Quick Select', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  const Row(
+                    children: [
+                      SparkleFigure(size: 11),
+                      SizedBox(width: 8),
+                      Text('Quick Select', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: AppTheme.displayFont)),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _searchCtrl,

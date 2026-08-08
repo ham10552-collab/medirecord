@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
 import '../../shared/widgets/patient_card.dart';
+import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/luxury_figures.dart';
 import '../../shared/models/patient.dart';
 
 class PatientListScreen extends StatefulWidget {
@@ -64,29 +66,17 @@ class _PatientListScreenState extends State<PatientListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Patients')),
-      drawer: Drawer(
-        child: ListView(
-          children: [
-            DrawerHeader(
-              decoration: const BoxDecoration(color: AppTheme.primaryColor),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: const [
-                  CircleAvatar(radius: 30, backgroundColor: Colors.white24, child: Icon(Icons.person, size: 36, color: Colors.white)),
-                  SizedBox(height: 12),
-                  Text('MediRecord', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text('Patient Records', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                ],
-              ),
-            ),
-            ListTile(leading: const Icon(Icons.dashboard), title: const Text('Dashboard'), onTap: () { Navigator.pop(context); context.go('/'); }),
-            ListTile(leading: const Icon(Icons.people), title: const Text('Patients'), onTap: () { Navigator.pop(context); context.go('/patients'); }),
-            ListTile(leading: const Icon(Icons.description), title: const Text('Reports'), onTap: () { Navigator.pop(context); context.go('/reports'); }),
-          ],
-        ),
+      appBar: AppBar(
+        title: const Text('Patients'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calendar_today_outlined),
+            tooltip: 'Bookings',
+            onPressed: () => context.push('/bookings'),
+          ),
+        ],
       ),
+      drawer: const AppDrawer(),
       floatingActionButton: FloatingActionButton(
         onPressed: () => context.push('/patients/add'),
         child: const Icon(Icons.add),
@@ -115,15 +105,34 @@ class _PatientListScreenState extends State<PatientListScreen> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                      child: TextField(
-                        onChanged: _onSearchChanged,
-                        decoration: InputDecoration(
-                          hintText: 'Search by name or phone...',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(icon: const Icon(Icons.clear), onPressed: () { _onSearchChanged(''); })
-                              : null,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const MedicalCrossFigure(size: 18),
+                              const SizedBox(width: 10),
+                              Text('Patient Records', style: AppTheme.displayStyle(size: 20, color: AppTheme.navy)),
+                              const Spacer(),
+                              const SparkleFigure(size: 13),
+                              const SizedBox(width: 6),
+                              const SparkleFigure(size: 9),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          const GoldDivider(),
+                          const SizedBox(height: 12),
+                          TextField(
+                            onChanged: _onSearchChanged,
+                            decoration: InputDecoration(
+                              hintText: 'Search by name or phone...',
+                              prefixIcon: const Icon(Icons.search),
+                              suffixIcon: _searchQuery.isNotEmpty
+                                  ? IconButton(icon: const Icon(Icons.clear), onPressed: () { _onSearchChanged(''); })
+                                  : null,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     Expanded(
@@ -132,13 +141,19 @@ class _PatientListScreenState extends State<PatientListScreen> {
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.people_outline, size: 60, color: Colors.grey[300]),
+                                  const MedicalCrossFigure(size: 28, gold: false),
                                   const SizedBox(height: 16),
+                                  const SparkleFigure(size: 10),
                                   Text(
                                     _searchQuery.isEmpty ? 'No patients yet' : 'No patients match your search',
-                                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+                                    style: AppTheme.displayStyle(size: 16, color: AppTheme.navy),
                                   ),
                                   const SizedBox(height: 8),
+                                  Text(
+                                    _searchQuery.isEmpty ? 'Add your first patient to get started' : 'Try a different name or phone',
+                                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                                  ),
+                                  const SizedBox(height: 16),
                                   ElevatedButton.icon(
                                     onPressed: () => context.push('/patients/add'),
                                     icon: const Icon(Icons.add),

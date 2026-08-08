@@ -7,6 +7,7 @@ import '../../core/providers/license_provider.dart';
 import '../../core/network/patient_server.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/app_storage.dart';
+import 'luxury_figures.dart';
 
 class AppDrawer extends ConsumerWidget {
   const AppDrawer({super.key});
@@ -20,37 +21,72 @@ class AppDrawer extends ConsumerWidget {
     return Drawer(
       child: Column(
         children: [
-          DrawerHeader(
-            decoration: const BoxDecoration(color: AppTheme.primaryColor),
+          Container(
+            decoration: const BoxDecoration(gradient: AppTheme.heroGradient),
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(20, 48, 20, 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                const CircleAvatar(
-                  radius: 30,
-                  backgroundColor: Colors.white24,
-                  child: Icon(Icons.person, size: 36, color: Colors.white),
+                Row(
+                  children: [
+                    const MedicalCrossFigure(size: 22),
+                    const SizedBox(width: 12),
+                    const Text(
+                      'MediRecord Pro',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        fontFamily: AppTheme.displayFont,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  user?.displayName ?? 'User',
-                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: Colors.white.withValues(alpha: 0.2),
+                      child: Text(
+                        (user?.displayName ?? 'U').substring(0, 1).toUpperCase(),
+                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user?.displayName ?? 'User',
+                          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          user?.email ?? '',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                Text(
-                  user?.email ?? '',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 10),
                 roleAsync.when(
                   data: (role) => Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(4),
+                      color: AppTheme.goldColor.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppTheme.goldLight.withValues(alpha: 0.5)),
                     ),
                     child: Text(
                       role?.toUpperCase() ?? '',
-                      style: const TextStyle(color: Colors.white, fontSize: 11),
+                      style: const TextStyle(
+                        color: AppTheme.goldLight,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   error: (_, __) => const SizedBox(),
@@ -65,6 +101,14 @@ class AppDrawer extends ConsumerWidget {
             onTap: () {
               context.pop();
               context.go('/');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.calendar_month_outlined),
+            title: const Text('Bookings'),
+            onTap: () {
+              context.pop();
+              context.push('/bookings');
             },
           ),
           ListTile(
@@ -112,38 +156,58 @@ class AppDrawer extends ConsumerWidget {
           // Server status (doctor mode)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.wifi, size: 16, color: server.state == ServerState.running ? Colors.green : Colors.grey),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    server.state == ServerState.running
-                        ? 'Server: ${server.ip}:${server.port}'
-                        : 'Server not running',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ),
-                if (server.state == ServerState.running)
-                  InkWell(
-                    onTap: () {
-                      Clipboard.setData(ClipboardData(text: '${server.ip}:${server.port}'));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('IP copied')));
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.copy, size: 14, color: Colors.grey[500]),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.primaryColor.withValues(alpha: 0.15)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.wifi, size: 16, color: server.state == ServerState.running ? AppTheme.successColor : Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      server.state == ServerState.running
+                          ? 'Server: ${server.ip}:${server.port}'
+                          : 'Server not running',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: server.state == ServerState.running ? AppTheme.textPrimary : Colors.grey[600],
+                        fontWeight: server.state == ServerState.running ? FontWeight.w600 : FontWeight.w400,
+                      ),
                     ),
                   ),
-              ],
+                  if (server.state == ServerState.running)
+                    InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: '${server.ip}:${server.port}'));
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('IP copied')));
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(Icons.copy, size: 14, color: Colors.grey[500]),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.arrow_back, color: Colors.grey),
-            title: const Text('Back to Setup', style: TextStyle(color: Colors.grey)),
+            leading: const Icon(Icons.settings_outlined),
+            title: const Text('Setup'),
             onTap: () {
               context.pop();
-              context.go('/welcome');
+              context.push('/setup');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.support_agent),
+            title: const Text('Support & Contact'),
+            onTap: () {
+              context.pop();
+              context.push('/contact');
             },
           ),
           const Spacer(),
@@ -152,12 +216,11 @@ class AppDrawer extends ConsumerWidget {
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text('Logout', style: TextStyle(color: Colors.red)),
             onTap: () async {
-              await AppStorage.delete('medirecord_licensed');
-              await AppStorage.delete('medirecord_trial');
+              // Logout = switch role only. The device license stays bound.
               await AppStorage.delete('medirecord_role');
               if (context.mounted) {
                 context.pop();
-                context.go('/splash');
+                context.go('/role');
               }
             },
           ),

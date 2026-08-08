@@ -9,7 +9,9 @@ import '../../core/utils/constants.dart';
 import '../../core/utils/app_storage.dart';
 import '../../core/utils/platform_helper.dart';
 import '../../shared/models/prescription.dart';
+import '../../shared/widgets/pending_items_list.dart';
 import '../patients/patient_provider.dart';
+import '../../shared/widgets/luxury_figures.dart';
 
 class PrescriptionFormScreen extends ConsumerStatefulWidget {
   final String patientId;
@@ -81,8 +83,14 @@ class _PrescriptionFormScreenState extends ConsumerState<PrescriptionFormScreen>
       if (content != null && content.isNotEmpty) {
         final lines = content.split('\n').where((l) => l.trim().isNotEmpty).toList();
         AppConstants.customDrugs.clear();
-        for (final name in lines) {
-          AppConstants.customDrugs.add({'drug': name.trim(), 'dosage': '', 'frequency': ''});
+        for (final line in lines) {
+          final parts = line.trim().split('|');
+          AppConstants.customDrugs.add({
+            'drug': parts[0].trim(),
+            'dosage': parts.length > 1 ? parts[1].trim() : '',
+            'frequency': parts.length > 2 ? parts[2].trim() : '',
+            'generic': parts.length > 3 ? parts[3].trim() : '',
+          });
         }
         _filteredDrugs = [...AppConstants.customDrugs, ...AppConstants.prescriptionDrugs];
         if (mounted) setState(() {});
@@ -90,12 +98,25 @@ class _PrescriptionFormScreenState extends ConsumerState<PrescriptionFormScreen>
     });
   }
 
-  void _saveCustomDrug(String name) {
+  void _saveCustomDrug(String name, {String dosage = '', String frequency = ''}) {
     if (name.trim().isEmpty) return;
-    if (AppConstants.customDrugs.any((m) => (m['drug'] ?? '').toLowerCase() == name.toLowerCase())) return;
-    AppConstants.customDrugs.add({'drug': name, 'dosage': '', 'frequency': ''});
-    final content = AppConstants.customDrugs.map((m) => m['drug']).join('\n');
+    final index = AppConstants.customDrugs.indexWhere(
+        (m) => (m['drug'] ?? '').toLowerCase() == name.toLowerCase());
+    if (index >= 0) {
+      AppConstants.customDrugs[index] = {
+        'drug': name,
+        'dosage': dosage,
+        'frequency': frequency,
+        'generic': AppConstants.customDrugs[index]['generic'] ?? '',
+      };
+    } else {
+      AppConstants.customDrugs.add({'drug': name, 'dosage': dosage, 'frequency': frequency, 'generic': ''});
+    }
+    final content = AppConstants.customDrugs
+        .map((m) => '${m['drug']}|${m['dosage']}|${m['frequency']}|${m['generic']}')
+        .join('\n');
     PlatformHelper.writeCustomDrugs(content);
+    _rebuildFilteredDrugs();
   }
 
   @override
@@ -159,7 +180,9 @@ class _PrescriptionFormScreenState extends ConsumerState<PrescriptionFormScreen>
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a medicine name first')));
       return;
     }
-    _saveCustomDrug(name);
+    _saveCustomDrug(name,
+        dosage: _dosageCtrl.text.trim(),
+        frequency: _frequencyCtrl.text.trim());
     setState(() {
       _addedItems.add(PrescriptionItem(
         medicineName: name,
@@ -221,9 +244,36 @@ class _PrescriptionFormScreenState extends ConsumerState<PrescriptionFormScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('New Prescription [C:${AppConstants.customDrugs.length}]')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const MedicalCrossFigure(size: 16),
+            const SizedBox(width: 10),
+            Text('New Prescription [C:${AppConstants.customDrugs.length}]'),
+          ],
+        ),
+      ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const SparkleFigure(size: 12),
+                    const SizedBox(width: 8),
+                    Text('Doctor\u2019s Prescription', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
+                    const Spacer(),
+                    const SparkleFigure(size: 9),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const GoldDivider(),
+              ],
+            ),
+          ),
           if (_addedItems.isNotEmpty) ...[
             Container(
               width: double.infinity,
@@ -244,23 +294,19 @@ class _PrescriptionFormScreenState extends ConsumerState<PrescriptionFormScreen>
                 ],
               ),
             ),
-            SizedBox(
-              height: 64,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                itemCount: _addedItems.length,
-                itemBuilder: (context, i) {
-                  final item = _addedItems[i];
-                  return Chip(
-                    avatar: Icon(Icons.medication, size: 14, color: AppTheme.primaryColor),
-                    label: Text(item.medicineName, style: const TextStyle(fontSize: 11)),
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () => _removeItem(i),
-                    backgroundColor: AppTheme.successColor.withValues(alpha: 0.1),
-                  );
-                },
-              ),
+            PendingItemsList(
+              itemCount: _addedItems.length,
+              iconBuilder: (_) => Icons.medication,
+              labelBuilder: (i) => _addedItems[i].medicineName,
+              subtitleBuilder: (i) {
+                final item = _addedItems[i];
+                return [
+                  item.dosage,
+                  item.frequency,
+                  item.duration,
+                ].where((s) => s.trim().isNotEmpty).join(' | ');
+              },
+              onRemove: _removeItem,
             ),
             const Divider(height: 1),
           ],

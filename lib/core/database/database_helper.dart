@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'package:localstorage/localstorage.dart';
+import '../license/license_manager.dart';
+import '../utils/constants.dart';
 import '../../shared/models/patient.dart';
 import '../../shared/models/medical_history.dart';
 import '../../shared/models/examination.dart';
@@ -7,6 +9,7 @@ import '../../shared/models/investigation.dart';
 import '../../shared/models/medication.dart';
 import '../../shared/models/allergy.dart';
 import '../../shared/models/prescription.dart';
+import '../../shared/models/booking.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -32,6 +35,19 @@ class DatabaseHelper {
     localStorage.setItem('medirecord_data', json.encode(_data));
   }
 
+  Future<String> exportAllData() async {
+    await _ensureLoaded();
+    return json.encode(_data);
+  }
+
+  Future<Map<String, dynamic>> importAllData(String rawJson) async {
+    await _ensureLoaded();
+    final parsed = json.decode(rawJson) as Map<String, dynamic>;
+    _data = parsed;
+    await _save();
+    return parsed;
+  }
+
   List<Map<String, dynamic>> _getList(String key) {
     _data.putIfAbsent(key, () => []);
     return List<Map<String, dynamic>>.from(_data[key] as List);
@@ -55,6 +71,17 @@ class DatabaseHelper {
 
   Future<int> insertPatient(Patient patient) async {
     await _ensureLoaded();
+
+    // Trial cap enforced at the write choke point so no code path (UI form,
+    // HTTP ingest, secretary local save) can bypass it.
+    final licensed = await LicenseManager.isLicensedOnDevice();
+    if (!licensed) {
+      final count = (_data['patients'] as List?)?.length ?? 0;
+      if (count >= AppConstants.maxTrialPatients) {
+        return 0; // blocked by trial limit
+      }
+    }
+
     _addToList('patients', patient.toMap());
     await _save();
     return 1;
@@ -358,5 +385,45 @@ class DatabaseHelper {
     await _ensureLoaded();
     final list = _getList('users');
     return list.cast<Map<String, dynamic>>().where((u) => u['email'] == email || u['id'] == email).firstOrNull;
+  }
+
+  Future<int> insertBooking(Booking booking) async {
+    await _ensureLoaded();
+    _addToList('bookings', booking.toMap());
+    await _save();
+    return 1;
+  }
+
+  Future<int> updateBooking(Booking booking) async {
+    await _ensureLoaded();
+    _updateInList('bookings', 'id', booking.id, booking.toMap());
+    await _save();
+    return 1;
+  }
+
+  Future<int> deleteBooking(String id) async {
+    await _ensureLoaded();
+    _deleteFromList('bookings', 'id', id);
+    await _save();
+    return 1;
+  }
+
+  Future<List<Booking>> getAllBookings() async {
+    await _ensureLoaded();
+    final list = _getList('bookings');
+    final bookings = list.cast<Map<String, dynamic>>().map((m) => Booking.fromMap(m)).toList();
+    bookings.sort((a, b) => '${a.date} ${a.time}'.compareTo('${b.date} ${b.time}'));
+    return bookings;
+  }
+
+  Future<List<Booking>> getBookingsByDate(String date) async {
+    await _ensureLoaded();
+    final list = _getList('bookings');
+    final bookings = list.cast<Map<String, dynamic>>()
+        .where((m) => m['date'] == date)
+        .map((m) => Booking.fromMap(m))
+        .toList();
+    bookings.sort((a, b) => a.time.compareTo(b.time));
+    return bookings;
   }
 }

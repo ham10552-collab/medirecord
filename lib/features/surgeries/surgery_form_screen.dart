@@ -7,6 +7,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/utils/constants.dart';
 import '../patients/patient_provider.dart';
+import '../../shared/widgets/pending_items_list.dart';
+import '../../shared/widgets/luxury_figures.dart';
 
 class SurgeryFormScreen extends ConsumerStatefulWidget {
   final String patientId;
@@ -132,9 +134,36 @@ class _SurgeryFormScreenState extends ConsumerState<SurgeryFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_addedItems.isEmpty ? 'Add Surgeries' : 'Surgeries (${_addedItems.length})')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const MedicalCrossFigure(size: 16),
+            const SizedBox(width: 10),
+            Text(_addedItems.isEmpty ? 'Add Surgeries' : 'Surgeries (${_addedItems.length})'),
+          ],
+        ),
+      ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const SparkleFigure(size: 12),
+                    const SizedBox(width: 8),
+                    Text('Surgery History', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
+                    const Spacer(),
+                    const SparkleFigure(size: 9),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const GoldDivider(),
+              ],
+            ),
+          ),
           if (_addedItems.isNotEmpty) ...[
             Container(
               width: double.infinity,
@@ -155,23 +184,12 @@ class _SurgeryFormScreenState extends ConsumerState<SurgeryFormScreen> {
                 ],
               ),
             ),
-            SizedBox(
-              height: 64,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                itemCount: _addedItems.length,
-                itemBuilder: (context, i) {
-                  final item = _addedItems[i];
-                  return Chip(
-                    avatar: Icon(Icons.local_hospital, size: 14, color: AppTheme.primaryColor),
-                    label: Text(item['surgery_name'] as String, style: const TextStyle(fontSize: 11)),
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () => _removeItem(i),
-                    backgroundColor: AppTheme.successColor.withValues(alpha: 0.1),
-                  );
-                },
-              ),
+            PendingItemsList(
+              itemCount: _addedItems.length,
+              iconBuilder: (_) => Icons.local_hospital,
+              labelBuilder: (i) => _addedItems[i]['surgery_name'] as String,
+              subtitleBuilder: (i) => _addedItems[i]['surgery_date'] != null ? '${_addedItems[i]['surgery_date']}' : null,
+              onRemove: _removeItem,
             ),
             const Divider(height: 1),
           ],

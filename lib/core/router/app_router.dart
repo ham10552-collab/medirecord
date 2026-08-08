@@ -19,6 +19,9 @@ import '../../features/allergies/allergy_form_screen.dart';
 import '../../features/reports/reports_screen.dart';
 import '../../features/prescriptions/prescription_form_screen.dart';
 import '../../features/admin/user_management_screen.dart';
+import '../../features/bookings/booking_screen.dart';
+import '../../features/setup/setup_screen.dart';
+import '../../features/support/contact_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -98,8 +101,20 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ReportsScreen(),
       ),
       GoRoute(
+        path: '/bookings',
+        builder: (context, state) => const BookingScreen(),
+      ),
+      GoRoute(
         path: '/admin/users',
         builder: (context, state) => const UserManagementScreen(),
+      ),
+      GoRoute(
+        path: '/setup',
+        builder: (context, state) => const SetupScreen(),
+      ),
+      GoRoute(
+        path: '/contact',
+        builder: (context, state) => const ContactScreen(),
       ),
     ],
   );
