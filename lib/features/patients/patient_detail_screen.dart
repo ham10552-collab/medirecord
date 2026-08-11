@@ -6,6 +6,9 @@ import 'package:path/path.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../../core/theme/app_theme.dart';
+import '../../core/auth/auth_provider.dart';
+import '../../core/network/queue_status.dart';
+import '../../core/utils/app_storage.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/utils/arabic_pdf.dart';
 import '../../core/utils/pdf_fonts.dart';
@@ -58,14 +61,44 @@ class _PatientDetailContent extends ConsumerWidget {
 
   const _PatientDetailContent({required this.patient});
 
+  static final _markedWithDoctor = <String>{};
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final roleAsync = ref.watch(userRoleProvider);
+    final deviceRole = ref.watch(deviceRoleProvider).valueOrNull;
+    final isPharmacist = deviceRole == 'pharmacist' || roleAsync.valueOrNull == 'pharmacist';
+    final isSecretary = !isPharmacist &&
+        (deviceRole == 'secretary' || roleAsync.valueOrNull == 'secretary');
+    final isDoctorMachine = !isPharmacist && !isSecretary;
+    if (isDoctorMachine && _markedWithDoctor.add(patient.id)) {
+      // Tell the secretary's waiting room this patient is with the doctor.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        QueueStatus.setStatus(patient.id, QueueStatus.statusWithDoctor);
+      });
+    }
     return DefaultTabController(
       length: 6,
       child: Scaffold(
         appBar: AppBar(
           title: Text(patient.fullName),
           actions: [
+            if (isDoctorMachine)
+              IconButton(
+                icon: const Icon(Icons.done_all, color: AppTheme.successColor),
+                tooltip: 'Finish visit - notify secretary',
+                onPressed: () async {
+                  await QueueStatus.setStatus(patient.id, QueueStatus.statusDone);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Visit finished - the secretary has been notified'),
+                        backgroundColor: AppTheme.successColor,
+                      ),
+                    );
+                  }
+                },
+              ),
             IconButton(
               icon: const Icon(Icons.picture_as_pdf),
               tooltip: 'Export PDF',
@@ -119,6 +152,7 @@ class _PatientDetailContent extends ConsumerWidget {
       final exams = await db.getPatientExaminations(p.id);
       final investigations = await db.getPatientInvestigations(p.id);
       final medications = await db.getPatientMedications(p.id);
+      final prescriptions = await db.getPatientPrescriptions(p.id);
 
       final pdf = pw.Document();
       pdf.addPage(
@@ -133,9 +167,12 @@ class _PatientDetailContent extends ConsumerWidget {
           ),
           build: (_) => [
             pw.Header(level: 1, text: arabicToPdf(p.fullName)),
-            pw.Paragraph(text: 'Age: ${p.age} years | Gender: ${arabicToPdf(p.gender)}'),
-            pw.Paragraph(text: 'Blood Group: ${arabicToPdf(p.bloodGroup ?? '-')} | Phone: ${arabicToPdf(p.phone ?? '-')}'),
-            if (p.address != null) pw.Paragraph(text: 'Address: ${arabicToPdf(p.address!)}'),
+            pw.Paragraph(text: 'Age: ${p.age} years | Gender: ${arabicToPdf(p.gender)} | Blood Group: ${arabicToPdf(p.bloodGroup ?? '-')}'),
+            pw.Paragraph(text: 'Phone: ${arabicToPdf(p.phone ?? '-')}${p.email != null && p.email!.isNotEmpty ? ' | Email: ${arabicToPdf(p.email!)}' : ''}'),
+            if (p.address != null && p.address!.isNotEmpty) pw.Paragraph(text: 'Address: ${arabicToPdf(p.address!)}'),
+            if ((p.emergencyContactName ?? '').isNotEmpty)
+              pw.Paragraph(text: 'Emergency Contact: ${arabicToPdf(p.emergencyContactName!)} (${arabicToPdf(p.emergencyContactPhone ?? '-')})'),
+            pw.Paragraph(text: 'Patient ID: ${p.id} | Registered: ${p.createdAt.split('T').first}'),
             pw.Divider(),
             if (history.isNotEmpty) ...[
               pw.Header(level: 2, text: 'Medical History'),
@@ -148,16 +185,16 @@ class _PatientDetailContent extends ConsumerWidget {
                 ],
               )),
             ],
-            if (surgeries.isNotEmpty) ...[
-              pw.Header(level: 2, text: 'Surgeries'),
-              ...surgeries.cast<Map<String, dynamic>>().map((s) => pw.Paragraph(
-                text: '${arabicToPdf(s['surgery_name'] ?? '')}${s['surgery_date'] != null ? ' (${arabicToPdf('${s['surgery_date']}')})' : ''}${s['hospital'] != null ? ' @ ${arabicToPdf('${s['hospital']}')}' : ''}',
-              )),
-            ],
             if (allergies.isNotEmpty) ...[
               pw.Header(level: 2, text: 'Allergies'),
               ...allergies.cast<Allergy>().map((a) => pw.Paragraph(
                 text: '${arabicToPdf(a.allergen)} (${arabicToPdf(a.severity)})${a.reaction != null ? ' - ${arabicToPdf(a.reaction!)}' : ''}',
+              )),
+            ],
+            if (surgeries.isNotEmpty) ...[
+              pw.Header(level: 2, text: 'Surgeries'),
+              ...surgeries.cast<Map<String, dynamic>>().map((s) => pw.Paragraph(
+                text: '${arabicToPdf(s['surgery_name'] ?? '')}${s['surgery_date'] != null ? ' (${arabicToPdf('${s['surgery_date']}')})' : ''}${s['hospital'] != null ? ' @ ${arabicToPdf('${s['hospital']}')}' : ''}${s['notes'] != null ? ' - ${arabicToPdf('${s['notes']}')}' : ''}',
               )),
             ],
             if (exams.isNotEmpty) ...[
@@ -166,9 +203,38 @@ class _PatientDetailContent extends ConsumerWidget {
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Paragraph(text: '${e.visitDate} - Dr. ${arabicToPdf(e.doctorName)}'),
-                  if (e.chiefComplaint != null) pw.Paragraph(text: '  Complaint: ${arabicToPdf(e.chiefComplaint!)}'),
-                  if (e.diagnosis != null) pw.Paragraph(text: '  Diagnosis: ${arabicToPdf(e.diagnosis!)}'),
-                  if (e.plan != null) pw.Paragraph(text: '  Plan: ${arabicToPdf(e.plan!)}'),
+                  if (e.chiefComplaint != null && e.chiefComplaint!.isNotEmpty) pw.Paragraph(text: '  Complaint: ${arabicToPdf(e.chiefComplaint!)}'),
+                  if (e.bp != null ||
+                      e.heartRate != null ||
+                      e.temperature != null ||
+                      e.respiratoryRate != null ||
+                      e.oxygenSaturation != null ||
+                      e.weight != null ||
+                      e.height != null)
+                    pw.Paragraph(text: '  Vitals: ${[
+                      if (e.bp != null) 'BP ${e.bp}',
+                      if (e.heartRate != null) 'HR ${e.heartRate}',
+                      if (e.temperature != null) 'Temp ${e.temperature}',
+                      if (e.respiratoryRate != null) 'RR ${e.respiratoryRate}',
+                      if (e.oxygenSaturation != null) 'O2 ${e.oxygenSaturation}%',
+                      if (e.weight != null) 'WT ${e.weight}kg',
+                      if (e.height != null) 'HT ${e.height}cm',
+                    ].join(' | ')}'),
+                  for (final part in {
+                    'General Appearance': e.generalAppearance,
+                    'Head & Neck': e.headAndNeck,
+                    'Chest': e.chest,
+                    'Abdomen': e.abdomen,
+                    'CVS': e.cvs,
+                    'CNS': e.cns,
+                    'Musculoskeletal': e.musculoskeletal,
+                    'Skin': e.skin,
+                    'Diagnosis': e.diagnosis,
+                    'Plan': e.plan,
+                    'Notes': e.notes,
+                  }.entries)
+                    if (part.value != null && part.value!.isNotEmpty)
+                      pw.Paragraph(text: '  ${part.key}: ${arabicToPdf(part.value!)}'),
                 ],
               )),
             ],
@@ -181,7 +247,19 @@ class _PatientDetailContent extends ConsumerWidget {
             if (medications.isNotEmpty) ...[
               pw.Header(level: 2, text: 'Medications'),
               ...medications.cast<Medication>().map((m) => pw.Paragraph(
-                text: '${arabicToPdf(m.drugName)} ${arabicToPdf(m.dosage)} - ${arabicToPdf(m.frequency)} (${m.isActive ? 'Active' : 'Inactive'})',
+                text: '${arabicToPdf(m.drugName)} ${arabicToPdf(m.dosage)} - ${arabicToPdf(m.frequency)}${m.duration != null && m.duration!.isNotEmpty ? ' for ${arabicToPdf(m.duration!)}' : ''} (${m.isActive ? 'Active' : 'Inactive'})',
+              )),
+            ],
+            if (prescriptions.isNotEmpty) ...[
+              pw.Header(level: 2, text: 'Prescriptions'),
+              ...prescriptions.cast<Prescription>().map((rx) => pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Paragraph(text: '${rx.createdAt.split('T').first} - Dr. ${arabicToPdf(rx.doctorName)} - ${rx.status.toUpperCase()}${rx.pharmacistName != null && rx.pharmacistName!.isNotEmpty ? ' by ${arabicToPdf(rx.pharmacistName!)}' : ''}'),
+                  ...rx.items.map((i) => pw.Paragraph(
+                    text: '  - ${arabicToPdf(i.medicineName)} ${arabicToPdf(i.dosage)}${i.frequency.isNotEmpty ? ' ${arabicToPdf(i.frequency)}' : ''}${i.duration.isNotEmpty ? ' (${arabicToPdf(i.duration)})' : ''}${i.instructions.isNotEmpty ? ' - ${arabicToPdf(i.instructions)}' : ''}',
+                  )),
+                ],
               )),
             ],
             pw.Divider(),
@@ -900,6 +978,46 @@ ElevatedButton.icon(
                               final path = await generatePrescriptionPdf(rx, patient);
                               if (context.mounted) await printPrescriptionDirect(context, path);
                             },
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              rx.sentToPharmacy ? Icons.refresh : Icons.send,
+                              size: 20,
+                              color: rx.sentToPharmacy ? AppTheme.successColor : AppTheme.primaryColor,
+                            ),
+                            tooltip: rx.sentToPharmacy ? 'Re-send to Pharmacy (appears as pending)' : 'Send to Pharmacy',
+                            onPressed: () async {
+                                    var loginName = (await AppStorage.read('doctor_name'))?.trim() ?? '';
+                                    if (loginName.isEmpty) {
+                                      loginName = ref.read(currentUserProvider)?.displayName?.trim() ?? '';
+                                    }
+                                    if (loginName.isEmpty) {
+                                      final saved = await AppStorage.read('last_doctor_name');
+                                      loginName = saved?.trim() ?? '';
+                                    }
+                                    if (loginName.isNotEmpty) {
+                                      await DatabaseHelper().attachDoctorName(rx.id, loginName);
+                                    }
+                                    final ok = rx.sentToPharmacy
+                                        ? await DatabaseHelper().resendPrescription(rx.id)
+                                        : await DatabaseHelper().markPrescriptionSent(rx.id);
+                                    if (ok > 0) {
+                                      await QueueStatus.setStatus(_patientId, QueueStatus.statusDone);
+                                    }
+                                    ref.invalidate(patientPrescriptionsProvider(_patientId));
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(ok > 0
+                                              ? (rx.sentToPharmacy
+                                                  ? 'Re-sent to Pharmacy - it will appear as pending'
+                                                  : 'Sent to Pharmacy - pharmacist will be notified')
+                                              : 'Failed to send - try again'),
+                                          backgroundColor: ok > 0 ? AppTheme.successColor : AppTheme.errorColor,
+                                        ),
+                                      );
+                                    }
+                                  },
                           ),
                           IconButton(
                             icon: const Icon(Icons.chat, size: 20),

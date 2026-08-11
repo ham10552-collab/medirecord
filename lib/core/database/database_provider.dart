@@ -29,3 +29,8 @@ final allUsersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async 
   final db = ref.watch(databaseProvider);
   return db.getAllUsers();
 });
+
+final pharmacyQueueProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final db = ref.watch(databaseProvider);
+  return db.getPharmacyQueue();
+});

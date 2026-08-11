@@ -8,6 +8,7 @@ import '../../core/database/database_helper.dart';
 import '../../core/utils/constants.dart';
 import '../../core/utils/app_storage.dart';
 import '../../core/utils/platform_helper.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../shared/models/prescription.dart';
 import '../../shared/widgets/pending_items_list.dart';
 import '../patients/patient_provider.dart';
@@ -56,6 +57,17 @@ class _PrescriptionFormScreenState extends ConsumerState<PrescriptionFormScreen>
       final saved = await AppStorage.read('last_doctor_name');
       if (saved != null && saved.isNotEmpty) {
         _doctorNameCtrl.text = saved;
+      } else {
+        final doctorName = (await AppStorage.read('doctor_name'))?.trim() ?? '';
+        if (doctorName.isNotEmpty) {
+          _doctorNameCtrl.text = doctorName;
+        } else {
+          final user = ref.read(currentUserProvider);
+          final displayName = user?.displayName?.trim();
+          if (displayName != null && displayName.isNotEmpty) {
+            _doctorNameCtrl.text = displayName;
+          }
+        }
       }
       final all = await AppStorage.read('doctor_names');
       if (all != null && all.isNotEmpty) {
@@ -208,7 +220,10 @@ class _PrescriptionFormScreenState extends ConsumerState<PrescriptionFormScreen>
     if (_medicineNameCtrl.text.trim().isNotEmpty) _addToLocal();
     if (_addedItems.isEmpty) return;
 
-    final doctorName = _doctorNameCtrl.text.trim().isEmpty ? 'Unknown' : _doctorNameCtrl.text.trim();
+    final loginName = ref.read(currentUserProvider)?.displayName?.trim() ?? '';
+    final doctorName = _doctorNameCtrl.text.trim().isEmpty
+        ? (loginName.isEmpty ? 'Unknown' : loginName)
+        : _doctorNameCtrl.text.trim();
 
     setState(() => _isSaving = true);
     try {

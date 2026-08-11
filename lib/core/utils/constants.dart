@@ -6,8 +6,8 @@ class AppConstants {
   static const int maxTrialPatients = 70;
 
   /// Maximum machines one license key can be bound to
-  /// (1 = doctor PC, 2 = doctor PC + secretary PC).
-  static const int maxLicenseSeats = 2;
+  /// (1 = doctor PC, 2 = doctor PC + secretary PC, 3 = + pharmacy PC).
+  static const int maxLicenseSeats = 3;
 
   static final List<Map<String, String>> customDrugs = <Map<String, String>>[];
 
@@ -24,7 +24,7 @@ class AppConstants {
   static const List<String> medicationRoutes = [
     'Oral', 'IV', 'IM', 'Subcutaneous', 'Topical', 'Sublingual', 'Inhalation', 'Rectal'
   ];
-  static const List<String> userRoles = ['admin', 'doctor', 'nurse'];
+  static const List<String> userRoles = ['admin', 'doctor', 'nurse', 'pharmacist', 'secretary'];
 
   /// History entry types available in the patient History form.
   static const List<String> historyTypes = ['Medical', 'Surgical', 'Allergy', 'Other'];

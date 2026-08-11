@@ -10,11 +10,17 @@ class PatientServer extends ChangeNotifier {
   String _ip = '';
   String _lastPatientName = '';
 
+  String _doctorIdentity = '';
+
   ServerState get state => _state;
   String get error => _error;
   int get port => _port;
   String get ip => _ip;
   String get lastPatientName => _lastPatientName;
+
+  /// The logged-in doctor's name, stamped onto prescriptions that have no
+  /// real doctor name so the pharmacy never sees 'Unknown'.
+  void setDoctorIdentity(String name) => _doctorIdentity = name;
 
   Future<void> start({int port = 9876}) async {
     _state = ServerState.stopped;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/app_storage.dart';
 import '../../shared/widgets/luxury_figures.dart';
@@ -12,7 +13,7 @@ class RoleScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       body: LuxNavyBackdrop(
-        showBack: true,
+        showBack: false,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -29,7 +30,7 @@ class RoleScreen extends ConsumerWidget {
                 children: [
                   InkWell(
                     borderRadius: BorderRadius.circular(14),
-                    onTap: () => _pickRole(context, 'doctor'),
+                    onTap: () => _pickRole(context, ref, 'doctor'),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       decoration: BoxDecoration(
@@ -59,12 +60,24 @@ class RoleScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
                   OutlinedButton.icon(
-                    onPressed: () => _pickRole(context, 'secretary'),
+                    onPressed: () => _pickRole(context, ref, 'secretary'),
                     icon: const Icon(Icons.assignment_ind, size: 28),
                     label: const Text("I'm a Secretary", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppTheme.primaryColor,
                       side: const BorderSide(color: AppTheme.goldColor, width: 1.6),
+                      minimumSize: const Size(double.infinity, 62),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: () => _pickRole(context, ref, 'pharmacist'),
+                    icon: const Icon(Icons.local_pharmacy, size: 28),
+                    label: const Text("I'm a Pharmacist", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.navy,
+                      side: const BorderSide(color: AppTheme.secondaryColor, width: 1.6),
                       minimumSize: const Size(double.infinity, 62),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
@@ -78,10 +91,14 @@ class RoleScreen extends ConsumerWidget {
     );
   }
 
-  void _pickRole(BuildContext context, String role) async {
+  void _pickRole(BuildContext context, WidgetRef ref, String role) async {
     await AppStorage.write('medirecord_role', role);
+    // Force the router/drawer to see the NEW role before we navigate, so a
+    // stale cached value can never route the doctor back to the pharmacy.
+    await ref.refresh(deviceRoleProvider.future);
     if (!context.mounted) return;
-    if (role == 'secretary') context.push('/secretary');
-    else context.push('/');
+    if (role == 'secretary') context.go('/secretary');
+    else if (role == 'pharmacist') context.go('/pharmacy');
+    else context.go('/');
   }
 }

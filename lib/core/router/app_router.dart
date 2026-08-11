@@ -1,5 +1,6 @@
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../features/splash/splash_screen.dart';
 import '../../features/welcome/welcome_screen.dart';
 import '../../features/license/license_activation_screen.dart';
@@ -22,10 +23,37 @@ import '../../features/admin/user_management_screen.dart';
 import '../../features/bookings/booking_screen.dart';
 import '../../features/setup/setup_screen.dart';
 import '../../features/support/contact_screen.dart';
+import '../../features/pharmacy/pharmacy_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/splash',
+    redirect: (context, state) {
+      // One role per computer. The device role (set on the role screen and
+      // stored per machine) gates every screen: a secretary machine cannot
+      // reach the doctor dashboard/patients/reports/pharmacy and a pharmacy
+      // machine can only use the pharmacy.
+      final role = ref.read(deviceRoleProvider).valueOrNull;
+      if (role == null) return null;
+      final loc = state.matchedLocation;
+      if (role == 'pharmacist') {
+        final blocked = loc == '/' ||
+            loc.startsWith('/patients') ||
+            loc == '/reports' ||
+            loc == '/bookings' ||
+            loc == '/secretary' ||
+            loc.startsWith('/admin');
+        if (blocked) return '/pharmacy';
+      } else if (role == 'secretary') {
+        final blocked = loc == '/' ||
+            loc.startsWith('/patients') ||
+            loc == '/reports' ||
+            loc == '/pharmacy' ||
+            loc.startsWith('/admin');
+        if (blocked) return '/secretary';
+      }
+      return null;
+    },
     routes: [
       GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
       GoRoute(path: '/welcome', builder: (context, state) => const WelcomeScreen()),
@@ -33,7 +61,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/role', builder: (context, state) => const RoleScreen()),
       GoRoute(path: '/secretary', builder: (context, state) => const SecretaryScreen()),
-      GoRoute(path: '/', builder: (context, state) => const DashboardScreen()),
+      GoRoute(
+        path: '/',
+        builder: (context, state) {
+          final role = ref.read(deviceRoleProvider).valueOrNull;
+          if (role == 'pharmacist') return const PharmacyScreen();
+          if (role == 'secretary') return const SecretaryScreen();
+          return const DashboardScreen();
+        },
+      ),
       GoRoute(
         path: '/patients',
         builder: (context, state) => const PatientListScreen(),
@@ -103,6 +139,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/bookings',
         builder: (context, state) => const BookingScreen(),
+      ),
+      GoRoute(
+        path: '/pharmacy',
+        builder: (context, state) => const PharmacyScreen(),
       ),
       GoRoute(
         path: '/admin/users',

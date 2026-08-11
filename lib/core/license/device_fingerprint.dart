@@ -1,28 +1,32 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../utils/app_storage.dart';
 
 /// Returns a stable device identifier for this installation.
 ///
 /// On Windows desktop we read the machine's `MachineGuid` (unique per OS
-/// install) and hash it. On other platforms / web we fall back to a stored
-/// random id so the value stays stable for this installation.
+/// install) and hash it together with a random per-install id, so even
+/// computers that were duplicated from the same system image get different
+/// device IDs. On other platforms / web we fall back to the stored random id.
 class DeviceIdentity {
   static String? _cache;
 
   static Future<String> fingerprint() async {
     if (_cache != null) return _cache!;
+    var installId = await AppStorage.read('medirecord_install_id');
+    if (installId == null || installId.isEmpty) {
+      final random = Random.secure();
+      installId = 'inst-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}'
+          '-${random.nextInt(0xFFFFFF).toRadixString(16)}';
+      await AppStorage.write('medirecord_install_id', installId);
+    }
     var raw = await _readMachineGuid();
     if (raw == null || raw.isEmpty) {
-      var stored = await AppStorage.read('medirecord_device_id');
-      if (stored == null || stored.isEmpty) {
-        stored = 'dev-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
-        await AppStorage.write('medirecord_device_id', stored);
-      }
-      raw = stored;
+      raw = installId;
     }
-    _cache = _hash(raw);
+    _cache = _hash('$raw|$installId');
     return _cache!;
   }
 

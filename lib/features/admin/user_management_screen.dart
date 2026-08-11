@@ -175,6 +175,8 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
                   DropdownMenuItem(value: 'admin', child: Text('Admin')),
                   DropdownMenuItem(value: 'doctor', child: Text('Doctor')),
                   DropdownMenuItem(value: 'nurse', child: Text('Nurse')),
+                  DropdownMenuItem(value: 'pharmacist', child: Text('Pharmacist')),
+                  DropdownMenuItem(value: 'secretary', child: Text('Secretary')),
                 ],
                 onChanged: (v) => role = v!,
               ),

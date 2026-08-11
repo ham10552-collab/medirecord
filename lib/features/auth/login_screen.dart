@@ -181,6 +181,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           DropdownMenuItem(value: 'admin', child: Text('Admin')),
                           DropdownMenuItem(value: 'doctor', child: Text('Doctor')),
                           DropdownMenuItem(value: 'nurse', child: Text('Nurse')),
+                          DropdownMenuItem(value: 'pharmacist', child: Text('Pharmacist')),
                         ],
                         onChanged: (v) => setState(() => _selectedRole = v!),
                       ),

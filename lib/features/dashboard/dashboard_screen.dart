@@ -11,6 +11,9 @@ import '../../core/providers/license_provider.dart';
 import '../../core/license/license_manager.dart';
 import '../../core/utils/constants.dart';
 import '../../core/network/patient_server.dart';
+import '../../core/network/pharmacy_notifications.dart';
+import '../../core/auth/auth_provider.dart';
+import '../../core/utils/app_storage.dart';
 import '../../shared/widgets/app_drawer.dart';
 import '../../shared/widgets/luxury_figures.dart';
 import '../../shared/models/patient.dart';
@@ -24,10 +27,12 @@ class DashboardScreen extends ConsumerStatefulWidget {
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   int _livePatientCount = 0;
-  final List<Patient> _notifications = [];
-  final List<Patient> _readNotifications = [];
+  final Set<String> _seenPatientIds = {};
+  final List<Map<String, dynamic>> _alerts = [];
+  bool _notificationsSeeded = false;
   int _lastPollCount = 0;
   Timer? _pollTimer;
+  bool _doctorNameChecked = false;
 
   @override
   void initState() {
@@ -35,8 +40,62 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     _refreshCount();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startServer();
+      _ensureDoctorName();
+      _loadAlerts();
+      incomingPatientNotifier.addListener(_onIncomingEvent);
       _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _pollDb());
     });
+  }
+
+  /// Asks the doctor for his name ONCE. The name is stored on this PC and is
+  /// used on every prescription he creates or sends - he never types it again.
+  Future<void> _ensureDoctorName() async {
+    String? saved;
+    try {
+      saved = await AppStorage.read('doctor_name');
+    } catch (_) {}
+    if (saved != null && saved.trim().isNotEmpty || _doctorNameChecked) return;
+    _doctorNameChecked = true;
+    final ctrl = TextEditingController(
+      text: ref.read(currentUserProvider)?.displayName?.trim() ?? '',
+    );
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Doctor Name'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Your name as it should appear on prescriptions',
+            hintText: 'e.g. Dr. Ahmed',
+            prefixIcon: Icon(Icons.person),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ''),
+            child: const Text('Skip'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (name != null && name.isNotEmpty) {
+      await AppStorage.write('doctor_name', name);
+      ref.invalidate(doctorNameProvider);
+      ref.read(patientServerProvider).setDoctorIdentity(name);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Doctor name saved: $name - used on all prescriptions'),
+          backgroundColor: AppTheme.successColor,
+        ),
+      );
+    }
   }
 
   @override
@@ -51,68 +110,88 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (mounted) setState(() => _livePatientCount = count);
   }
 
+  Future<void> _loadAlerts() async {
+    final alerts = await readIncomingAlerts();
+    if (mounted) setState(() {
+      _alerts
+        ..clear()
+        ..addAll(alerts);
+    });
+  }
+
+  void _onIncomingEvent() {
+    if (incomingPatientNotifier.value.isNotEmpty) {
+      _loadAlerts();
+    }
+  }
+
   Future<void> _pollDb() async {
-    final count = await DatabaseHelper().getPatientCount();
+    final patients = await DatabaseHelper().getAllPatients();
     if (!mounted) return;
-    if (count > _lastPollCount) {
-      final diff = count - _lastPollCount;
-      _lastPollCount = count;
-      _livePatientCount = count;
-      final patients = await DatabaseHelper().getAllPatients();
-      if (!mounted) return;
-      final newPatients = patients.sublist(patients.length - diff);
-      for (final p in newPatients) {
-        if (!_notifications.any((n) => n.id == p.id) && !_readNotifications.any((n) => n.id == p.id)) {
-          _notifications.add(p);
-        }
-      }
-      setState(() {});
-      for (final p in newPatients) {
-        try {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('New patient received: ${p.fullName}'),
-            backgroundColor: AppTheme.successColor,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 4),
-          ));
-        } catch (_) {}
-      }
-    } else {
-      _lastPollCount = count;
+    _livePatientCount = patients.length;
+    if (!_notificationsSeeded) {
+      _notificationsSeeded = true;
+      _seenPatientIds.addAll(patients.map((p) => p.id));
+      return;
+    }
+    final fresh = patients
+        .where((p) =>
+            !_seenPatientIds.contains(p.id) &&
+            !_alerts.any((a) => a['id'] == p.id))
+        .toList();
+    setState(() {
+      _lastPollCount = patients.length;
+      _seenPatientIds.addAll(patients.map((p) => p.id));
+    });
+    for (final p in fresh) {
+      await recordIncomingAlert(p.id, p.fullName);
+    }
+    if (fresh.isNotEmpty) {
+      await _loadAlerts();
+      try {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('New patient received: ${fresh.first.fullName}'
+              '${fresh.length > 1 ? ' (+${fresh.length - 1} more)' : ''}'),
+          backgroundColor: AppTheme.successColor,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ));
+      } catch (_) {}
     }
   }
 
   Future<void> _startServer() async {
     final server = ref.read(patientServerProvider);
+    var name = (await AppStorage.read('doctor_name'))?.trim() ?? '';
+    if (name.isEmpty) {
+      name = ref.read(currentUserProvider)?.displayName?.trim() ?? '';
+    }
+    if (name.isEmpty) {
+      name = (await AppStorage.read('last_doctor_name'))?.trim() ?? '';
+    }
+    if (name.isNotEmpty) {
+      server.setDoctorIdentity(name);
+    }
     if (server.state == ServerState.stopped) {
       await server.start();
     }
   }
 
-  void _openNotifications() {
-    final pending = List<Patient>.from(_notifications);
+  Future<void> _openNotifications() async {
+    final snapshot = List<Map<String, dynamic>>.from(_alerts);
+    final hadUnread = snapshot.any((a) => a['read'] != true);
+    await markIncomingAlertsRead();
+    if (hadUnread) _loadAlerts();
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => _NotificationPanel(
-        newPatients: pending,
-        previousPatients: List<Patient>.from(_readNotifications),
-        onOpenPatient: (patient) {
+      builder: (sheetCtx) => _IncomingPanel(
+        alerts: snapshot,
+        onOpenPatient: (id) {
           Navigator.pop(sheetCtx);
-          setState(() {
-            _notifications.removeWhere((n) => n.id == patient.id);
-            if (!_readNotifications.any((n) => n.id == patient.id)) {
-              _readNotifications.add(patient);
-            }
-          });
-          context.push('/patients/${patient.id}');
-        },
-        onClearAll: () {
-          setState(() {
-            _readNotifications.addAll(_notifications);
-            _notifications.clear();
-          });
+          context.push('/patients/$id');
         },
       ),
     );
@@ -135,12 +214,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final count = _livePatientCount;
     final male = genderDist.valueOrNull?['Male'] ?? 0;
     final female = genderDist.valueOrNull?['Female'] ?? 0;
-    final hasNew = _notifications.isNotEmpty;
+    final unreadAlerts = _alerts.where((a) => a['read'] != true).length;
+    final hasNew = unreadAlerts > 0;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('MediRecord'),
         actions: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppTheme.goldColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.5)),
+              ),
+              child: const Text('v24',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppTheme.goldDeep)),
+            ),
+          ),
           IconButton(
             icon: Icon(themeMode == ThemeMode.dark ? Icons.light_mode : Icons.dark_mode),
             tooltip: themeMode == ThemeMode.dark ? 'Light Mode' : 'Dark Mode',
@@ -178,7 +271,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         border: Border.all(color: Colors.white, width: 1),
                       ),
                       child: Text(
-                        '${_notifications.length}',
+                        '$unreadAlerts',
                         style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -679,22 +772,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-class _NotificationPanel extends StatelessWidget {
-  final List<Patient> newPatients;
-  final List<Patient> previousPatients;
-  final void Function(Patient) onOpenPatient;
-  final VoidCallback onClearAll;
+class _IncomingPanel extends StatelessWidget {
+  final List<Map<String, dynamic>> alerts;
+  final void Function(String id) onOpenPatient;
 
-  const _NotificationPanel({
-    required this.newPatients,
-    required this.previousPatients,
-    required this.onOpenPatient,
-    required this.onClearAll,
-  });
+  const _IncomingPanel({required this.alerts, required this.onOpenPatient});
 
   @override
   Widget build(BuildContext context) {
-    final all = [...newPatients, ...previousPatients];
     return Container(
       height: MediaQuery.of(context).size.height * 0.75,
       decoration: const BoxDecoration(
@@ -718,48 +803,27 @@ class _NotificationPanel extends StatelessWidget {
               children: [
                 const MedicalCrossFigure(size: 16),
                 const SizedBox(width: 10),
-                Text('Notifications', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
+                Text('Incoming Patients', style: AppTheme.displayStyle(size: 19, color: AppTheme.navy)),
                 const Spacer(),
-                if (newPatients.isNotEmpty)
-                  IconButton(
-                    icon: const Icon(Icons.done_all, color: AppTheme.textSecondary),
-                    tooltip: 'Mark all read',
-                    onPressed: onClearAll,
-                  ),
+                if (alerts.isNotEmpty)
+                  Text('${alerts.length} total',
+                      style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
               ],
             ),
           ),
-          if (newPatients.isNotEmpty)
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                gradient: AppTheme.goldGradient,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '${newPatients.length} NEW PATIENT${newPatients.length == 1 ? '' : 'S'} FROM SECRETARY',
-                style: const TextStyle(
-                  color: AppTheme.navyDeep,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.8,
-                ),
-              ),
-            ),
           const SizedBox(height: 8),
           const GoldDivider(),
           Expanded(
-            child: all.isEmpty
+            child: alerts.isEmpty
                 ? const Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.notifications_off_outlined, size: 52, color: AppTheme.dividerColor),
                         SizedBox(height: 12),
-                        Text('No notifications yet', style: TextStyle(color: AppTheme.textSecondary)),
+                        Text('No new patients yet', style: TextStyle(color: AppTheme.textSecondary)),
                         SizedBox(height: 4),
-                        Text('New patients sent by the secretary\nwill appear here',
+                        Text('Patients sent by the secretary\nwill appear here',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                       ],
@@ -767,126 +831,48 @@ class _NotificationPanel extends StatelessWidget {
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.only(bottom: 20),
-                    itemCount: all.length,
+                    itemCount: alerts.length,
                     itemBuilder: (context, i) {
-                      final p = all[i];
-                      final isNew = i < newPatients.length;
-                      return _notificationTile(context, p, isNew);
+                      final a = alerts[i];
+                      final name = (a['name'] as String? ?? 'Patient');
+                      final at = a['at'] as String? ?? '';
+                      return Container(
+                        margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                        decoration: BoxDecoration(
+                          color: a['read'] != true
+                              ? AppTheme.goldColor.withValues(alpha: 0.08)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: a['read'] != true
+                                ? AppTheme.goldColor.withValues(alpha: 0.55)
+                                : AppTheme.dividerColor,
+                            width: 1.2,
+                          ),
+                        ),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            radius: 20,
+                            backgroundColor: AppTheme.primaryColor,
+                            child: Text(
+                              name.substring(0, 1).toUpperCase(),
+                              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text(
+                            at.length >= 16 ? 'Sent ${at.substring(0, 10)} at ${at.substring(11, 16)}' : 'Sent just now',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.textSecondary),
+                          onTap: () => onOpenPatient(a['id'] as String? ?? ''),
+                        ),
+                      );
                     },
                   ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _notificationTile(BuildContext context, Patient p, bool isNew) {
-    final initial = p.fullName.isNotEmpty ? p.fullName.substring(0, 1).toUpperCase() : '?';
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      decoration: BoxDecoration(
-        color: isNew ? AppTheme.goldColor.withValues(alpha: 0.08) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isNew ? AppTheme.goldColor.withValues(alpha: 0.55) : AppTheme.dividerColor,
-          width: 1.2,
-        ),
-      ),
-      child: ListTile(
-        onTap: () => onOpenPatient(p),
-        leading: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            gradient: isNew ? AppTheme.goldGradient : AppTheme.heroGradient,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: (isNew ? AppTheme.goldColor : AppTheme.primaryColor).withValues(alpha: 0.35),
-                blurRadius: 8,
-              ),
-            ],
-          ),
-          child: Center(
-            child: Text(
-              initial,
-              style: TextStyle(
-                color: isNew ? AppTheme.navyDeep : Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ),
-        title: Row(
-          children: [
-            Flexible(
-              child: Text(
-                p.fullName,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-              ),
-            ),
-            if (isNew) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.errorColor,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Text('NEW', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800)),
-              ),
-            ],
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 12,
-              runSpacing: 2,
-              children: [
-                _infoChip(Icons.cake_outlined, '${p.age} yrs'),
-                _infoChip(p.gender.toLowerCase() == 'female' ? Icons.female : Icons.male, p.gender),
-                if (p.bloodGroup != null) _infoChip(Icons.bloodtype_outlined, p.bloodGroup!),
-                if (p.phone != null) _infoChip(Icons.phone_outlined, p.phone!),
-              ],
-            ),
-            if (p.address != null && p.address!.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  const Icon(Icons.location_on_outlined, size: 13, color: AppTheme.textSecondary),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      p.address!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-        trailing: const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
-      ),
-    );
-  }
-
-  Widget _infoChip(IconData icon, String text) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 13, color: AppTheme.primaryColor),
-        const SizedBox(width: 3),
-        Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-      ],
     );
   }
 }

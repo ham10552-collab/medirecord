@@ -15,11 +15,21 @@ class AppDrawer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider);
+    final savedName = ref.watch(doctorNameProvider).valueOrNull ?? '';
     final roleAsync = ref.watch(userRoleProvider);
+    final deviceRole = ref.watch(deviceRoleProvider).valueOrNull;
     final server = ref.watch(patientServerProvider);
+    final isPharmacist = deviceRole == 'pharmacist' || roleAsync.valueOrNull == 'pharmacist';
+    final isSecretary = !isPharmacist &&
+        (deviceRole == 'secretary' || roleAsync.valueOrNull == 'secretary');
+    final isDoctorMachine = !isPharmacist && !isSecretary;
+    final displayName = (user?.displayName?.trim() ?? '').isEmpty
+        ? (isDoctorMachine ? savedName : '')
+        : user!.displayName!.trim();
 
     return Drawer(
-      child: Column(
+      child: ListView(
+        padding: EdgeInsets.zero,
         children: [
           Container(
             decoration: const BoxDecoration(gradient: AppTheme.heroGradient),
@@ -51,7 +61,7 @@ class AppDrawer extends ConsumerWidget {
                       radius: 22,
                       backgroundColor: Colors.white.withValues(alpha: 0.2),
                       child: Text(
-                        (user?.displayName ?? 'U').substring(0, 1).toUpperCase(),
+                        (displayName.isEmpty ? 'U' : displayName.substring(0, 1)).toUpperCase(),
                         style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -60,7 +70,7 @@ class AppDrawer extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          user?.displayName ?? 'User',
+                          displayName.isEmpty ? 'User' : displayName,
                           style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
                         ),
                         Text(
@@ -92,50 +102,82 @@ class AppDrawer extends ConsumerWidget {
                   error: (_, __) => const SizedBox(),
                   loading: () => const SizedBox(),
                 ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: const Text(
+                      'Version v24',
+                      style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.dashboard),
-            title: const Text('Dashboard'),
+            leading: Icon(isPharmacist
+                ? Icons.local_pharmacy
+                : isSecretary
+                    ? Icons.supervisor_account
+                    : Icons.dashboard,
+                color: isPharmacist || isSecretary ? AppTheme.goldDeep : null),
+            title: Text(isPharmacist ? 'Pharmacy' : isSecretary ? 'Secretary' : 'Dashboard'),
             onTap: () {
               context.pop();
               context.go('/');
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.calendar_month_outlined),
-            title: const Text('Bookings'),
-            onTap: () {
-              context.pop();
-              context.push('/bookings');
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.people),
-            title: const Text('Patients'),
-            onTap: () {
-              context.pop();
-              context.go('/patients');
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.description),
-            title: const Text('Reports'),
-            onTap: () {
-              context.pop();
-              context.go('/reports');
-            },
-          ),
+          if (!isPharmacist)
+            ListTile(
+              leading: const Icon(Icons.calendar_month_outlined),
+              title: const Text('Bookings'),
+              onTap: () {
+                context.pop();
+                context.push('/bookings');
+              },
+            ),
+          if (!isPharmacist && !isSecretary) ...[
+            ListTile(
+              leading: const Icon(Icons.people),
+              title: const Text('Patients'),
+              onTap: () {
+                context.pop();
+                context.push('/patients');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.local_pharmacy_outlined),
+              title: const Text('Pharmacy (my sent)'),
+              onTap: () {
+                context.pop();
+                context.push('/pharmacy');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.description),
+              title: const Text('Reports'),
+              onTap: () {
+                context.pop();
+                context.push('/reports');
+              },
+            ),
+          ],
           roleAsync.when(
             data: (role) {
-              if (role == 'admin') {
+              if (role == 'admin' && !isPharmacist && !isSecretary) {
                 return ListTile(
                   leading: const Icon(Icons.admin_panel_settings),
                   title: const Text('User Management'),
                   onTap: () {
                     context.pop();
-                    context.go('/admin/users');
+                    context.push('/admin/users');
                   },
                 );
               }
@@ -153,9 +195,10 @@ class AppDrawer extends ConsumerWidget {
                 context.push('/license');
               },
             ),
-          // Server status (doctor mode)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          // Server status (doctor mode only)
+          if (!isSecretary && !isPharmacist)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
@@ -210,20 +253,24 @@ class AppDrawer extends ConsumerWidget {
               context.push('/contact');
             },
           ),
-          const Spacer(),
+          const SizedBox(height: 12),
           const Divider(),
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text('Logout', style: TextStyle(color: Colors.red)),
-            onTap: () async {
-              // Logout = switch role only. The device license stays bound.
-              await AppStorage.delete('medirecord_role');
-              if (context.mounted) {
-                context.pop();
-                context.go('/role');
-              }
-            },
-          ),
+          // One role per computer: once the license is active only the doctor
+          // machine can switch roles (trial mode keeps switching for testing).
+          if (ref.watch(licenseStatusProvider) == LicenseStatus.trial ||
+              (!isSecretary && !isPharmacist))
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('Logout', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                // Logout = switch role only. The device license stays bound.
+                await AppStorage.delete('medirecord_role');
+                if (context.mounted) {
+                  context.pop();
+                  context.go('/role');
+                }
+              },
+            ),
           const SizedBox(height: 16),
         ],
       ),

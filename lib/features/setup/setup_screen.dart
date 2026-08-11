@@ -3,10 +3,69 @@ import 'package:flutter/material.dart';
 import 'package:file_selector/file_selector.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
+import '../../core/utils/app_storage.dart';
+import '../../core/utils/backup_manager.dart';
 import '../../shared/widgets/luxury_figures.dart';
 
-class SetupScreen extends StatelessWidget {
+class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
+
+  @override
+  State<SetupScreen> createState() => _SetupScreenState();
+}
+
+class _SetupScreenState extends State<SetupScreen> {
+  String _folder = '';
+  String _lastBackup = '';
+  int _backupCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshInfo();
+  }
+
+  Future<void> _refreshInfo() async {
+    final folder = await BackupManager.resolveFolder();
+    final last = await AppStorage.read(BackupManager.lastKey) ?? '';
+    final list = await BackupManager.listBackups();
+    if (!mounted) return;
+    setState(() {
+      _folder = folder.path;
+      _lastBackup = last;
+      _backupCount = list.length;
+    });
+  }
+
+  Future<void> _chooseFolder() async {
+    final dir = await getDirectoryPath(
+      confirmButtonText: 'Use This Folder',
+      initialDirectory: _folder,
+    );
+    if (dir == null) return;
+    await AppStorage.write(BackupManager.folderKey, dir);
+    await BackupManager.runDailyBackup();
+    await _refreshInfo();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Automatic daily backups will be saved in:\n$dir'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  Future<void> _backupNow() async {
+    final path = await BackupManager.createBackup();
+    await _refreshInfo();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(path != null ? 'Backup saved:\n$path' : 'Backup failed - try again'),
+        backgroundColor: path != null ? Colors.green : AppTheme.errorColor,
+      ),
+    );
+  }
 
   Future<void> _exportBackup(BuildContext context) async {
     try {
@@ -92,34 +151,65 @@ class SetupScreen extends StatelessWidget {
     return Scaffold(
       body: LuxNavyBackdrop(
         showBack: true,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const LuxBrandHeader(
-              title: 'Setup & Backup',
-              tagline: 'PROTECT YOUR DATA WITH ONE CLICK',
-            ),
-            const SizedBox(height: 28),
-            _ActionCard(
-              icon: Icons.file_download_outlined,
-              title: 'Backup data to a file',
-              subtitle: 'Choose where to save a full copy of all records',
-              onTap: () => _exportBackup(context),
-            ),
-            const SizedBox(height: 14),
-            _ActionCard(
-              icon: Icons.file_upload_outlined,
-              title: 'Restore from a backup',
-              subtitle: 'Load a backup file and replace current data',
-              onTap: () => _restoreBackup(context),
-            ),
-            const SizedBox(height: 28),
-            const Text(
-              'Backups are saved as JSON files you can store anywhere: USB, cloud, or another PC.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.goldLight, fontSize: 12),
-            ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 24),
+              const LuxBrandHeader(
+                title: 'Setup & Backup',
+                tagline: 'AUTOMATIC DAILY BACKUPS - NO MORE LOSING DATA',
+              ),
+              const SizedBox(height: 24),
+              _ActionCard(
+                icon: Icons.folder_outlined,
+                title: 'Automatic backup folder',
+                subtitle: _folder.isEmpty
+                    ? 'Choose where daily backups are saved'
+                    : 'Folder:\n${_lastBackup.isNotEmpty ? 'Last backup: $_lastBackup' : ''}',
+                trailing: Text(
+                  _folder.isEmpty ? 'Tap to choose' : '$_backupCount backup(s)',
+                  style: const TextStyle(color: AppTheme.goldLight, fontSize: 10),
+                ),
+                onTap: _chooseFolder,
+              ),
+              const SizedBox(height: 14),
+              _ActionCard(
+                icon: Icons.cloud_upload_outlined,
+                title: 'Back up now',
+                subtitle: 'One backup of everything - records, prescriptions, images',
+                trailing: Text(
+                  _lastBackup.isEmpty ? 'Not backed up yet' : 'Daily at app start',
+                  style: const TextStyle(color: AppTheme.goldLight, fontSize: 10),
+                ),
+                onTap: _backupNow,
+              ),
+              const SizedBox(height: 14),
+              _ActionCard(
+                icon: Icons.file_download_outlined,
+                title: 'Backup data to a chosen file',
+                subtitle: 'Save a full copy anywhere: USB, cloud, another PC',
+                onTap: () => _exportBackup(context),
+              ),
+              const SizedBox(height: 14),
+              _ActionCard(
+                icon: Icons.file_upload_outlined,
+                title: 'Restore from a backup',
+                subtitle: 'Load a backup file and replace current data',
+                onTap: () => _restoreBackup(context),
+              ),
+              const SizedBox(height: 24),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  'A backup is created automatically once per day (the last 21 are kept). Backups are JSON files you can store anywhere.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppTheme.goldLight, fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
@@ -130,12 +220,14 @@ class _ActionCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
+  final Widget? trailing;
   final VoidCallback onTap;
   const _ActionCard({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.trailing,
   });
 
   @override
@@ -143,8 +235,8 @@ class _ActionCard extends StatelessWidget {
     return LuxHover(
       onTap: onTap,
       child: Container(
-        width: 360,
-        padding: const EdgeInsets.all(18),
+        width: 380,
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFF101D45), Color(0xFF0B1430)],
@@ -166,7 +258,7 @@ class _ActionCard extends StatelessWidget {
               ),
               child: Icon(icon, color: AppTheme.navyDeep, size: 24),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -183,8 +275,14 @@ class _ActionCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     subtitle,
-                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                    style: const TextStyle(color: Colors.white60, fontSize: 11),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                   ),
+                  if (trailing != null) ...[
+                    const SizedBox(height: 4),
+                    trailing!,
+                  ],
                 ],
               ),
             ),

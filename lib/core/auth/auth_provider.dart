@@ -34,3 +34,13 @@ final isLoggedInProvider = Provider<bool>((ref) {
 final localSessionProvider = FutureProvider<String?>((ref) async {
   return await AppStorage.read('local_session');
 });
+
+final deviceRoleProvider = FutureProvider<String?>((ref) async {
+  return await AppStorage.read('medirecord_role');
+});
+
+/// The doctor's name saved once on this PC ('doctor_name'). Used on
+/// prescriptions, on the server identity and in the app header.
+final doctorNameProvider = FutureProvider<String>((ref) async {
+  return (await AppStorage.read('doctor_name'))?.trim() ?? '';
+});

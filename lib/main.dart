@@ -1,6 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:window_manager/window_manager.dart';
 import 'app.dart';
+import 'core/network/pharmacy_background_sync.dart';
+import 'core/network/pharmacy_notifications.dart';
+import 'core/database/database_provider.dart';
+import 'core/utils/windows_notifier.dart';
+import 'core/utils/backup_manager.dart';
 import 'shared/widgets/luxury_figures.dart';
 import 'core/theme/app_theme.dart';
 
@@ -12,7 +20,37 @@ void main() async {
     FlutterError.presentError(details);
   };
 
-  runApp(const ProviderScope(child: MediRecordApp()));
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+    await windowsControlsInit();
+    unawaited(WindowsNotifier.init());
+  }
+  if (!kIsWeb) {
+    unawaited(BackupManager.runDailyBackup());
+  }
+
+  final container = ProviderContainer();
+  if (!kIsWeb) {
+    startPharmacyBackgroundSync(container);
+    pharmacyNewRxNotifier.addListener(drainPharmacyNotifications);
+    secretaryStatusNotifier.addListener(drainSecretaryStatusNotifications);
+    incomingPatientNotifier.addListener(() {
+      if (incomingPatientNotifier.value.isNotEmpty) {
+        container.invalidate(allPatientsProvider);
+        container.invalidate(patientCountProvider);
+      }
+      drainIncomingPatientNotifications();
+    });
+  }
+  runApp(UncontrolledProviderScope(
+    container: container,
+    child: const MediRecordApp(),
+  ));
+}
+
+Future<void> windowsControlsInit() async {
+  try {
+    await windowManager.ensureInitialized();
+  } catch (_) {}
 }
 
 class _LuxErrorScreen extends StatelessWidget {

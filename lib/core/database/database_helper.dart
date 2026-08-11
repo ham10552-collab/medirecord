@@ -97,12 +97,58 @@ class DatabaseHelper {
   Future<int> deletePatient(String id) async {
     await _ensureLoaded();
     _deleteFromList('patients', 'id', id);
-    for (final key in ['medical_history', 'examinations', 'investigations', 'medications', 'surgeries', 'allergies']) {
+    for (final key in ['medical_history', 'examinations', 'investigations', 'medications', 'surgeries', 'allergies', 'prescriptions', 'bookings']) {
       final list = _data[key] as List?;
       if (list != null) {
         list.removeWhere((m) => (m as Map<String, dynamic>)['patient_id'] == id);
       }
     }
+    await _save();
+    return 1;
+  }
+
+  /// Groups patients that look like the same person (same first + last name).
+  /// Each returned group is a list of patient records (name, phone, age, id).
+  Future<List<List<Map<String, dynamic>>>> findDuplicatePatients() async {
+    await _ensureLoaded();
+    final list = _getList('patients');
+    final groups = <String, List<Map<String, dynamic>>>{};
+    for (final m in list) {
+      final key = '${(m['first_name'] as String? ?? '').trim().toLowerCase()}|${(m['last_name'] as String? ?? '').trim().toLowerCase()}';
+      if (key == '|') continue;
+      groups.putIfAbsent(key, () => []).add(m);
+    }
+    return groups.values.where((g) => g.length > 1).toList();
+  }
+
+  /// Moves every linked record (history, exams, investigations, medications,
+  /// surgeries, allergies, prescriptions, bookings, alerts) plus the photo
+  /// from [removeId] into [keepId], then deletes the duplicate patient.
+  Future<int> mergePatients(String keepId, String removeId) async {
+    await _ensureLoaded();
+    for (final key in ['medical_history', 'examinations', 'investigations', 'medications', 'surgeries', 'allergies', 'prescriptions', 'bookings', 'incoming_alerts']) {
+      final list = _data[key] as List?;
+      if (list != null) {
+        for (final m in list) {
+          if ((m as Map<String, dynamic>)['patient_id'] == removeId) {
+            m['patient_id'] = keepId;
+          }
+        }
+      }
+    }
+    final patients = _getList('patients');
+    final keep = patients.cast<Map<String, dynamic>>().where((p) => p['id'] == keepId).firstOrNull;
+    final remove = patients.cast<Map<String, dynamic>>().where((p) => p['id'] == removeId).firstOrNull;
+    if (keep != null && remove != null) {
+      final keepPhoto = keep['photo_url'] as String?;
+      final removePhoto = remove['photo_url'] as String?;
+      if ((keepPhoto == null || keepPhoto.isEmpty) && removePhoto != null && removePhoto.isNotEmpty) {
+        keep['photo_url'] = removePhoto;
+      }
+      if ((keep['phone'] as String? ?? '').isEmpty) keep['phone'] = remove['phone'];
+      if ((keep['address'] as String? ?? '').isEmpty) keep['address'] = remove['address'];
+    }
+    _deleteFromList('patients', 'id', removeId);
     await _save();
     return 1;
   }
@@ -347,6 +393,21 @@ class DatabaseHelper {
     return 1;
   }
 
+  /// Inserts a prescription, or replaces an existing one with the same id
+  /// (used when syncing the pharmacy queue from the doctor's install).
+  Future<int> upsertPrescription(Prescription prescription) async {
+    await _ensureLoaded();
+    final list = _getList('prescriptions');
+    final index = list.indexWhere((m) => m['id'] == prescription.id);
+    if (index >= 0) {
+      list[index] = prescription.toMap();
+    } else {
+      list.add(prescription.toMap());
+    }
+    await _save();
+    return 1;
+  }
+
   Future<List<Prescription>> getPatientPrescriptions(String patientId) async {
     await _ensureLoaded();
     final list = _getList('prescriptions');
@@ -362,6 +423,142 @@ class DatabaseHelper {
     _deleteFromList('prescriptions', 'id', id);
     await _save();
     return 1;
+  }
+
+  /// Re-sends an already sent prescription - the pharmacy receives it again
+  /// as a fresh pending item (e.g. a refill).
+  Future<int> resendPrescription(String id) async {
+    await _ensureLoaded();
+    final list = _getList('prescriptions');
+    final index = list.indexWhere((m) => m['id'] == id);
+    if (index >= 0) {
+      final item = list[index];
+      item['sent_to_pharmacy'] = 1;
+      item['status'] = 'pending';
+      item.remove('dispensed_by');
+      item.remove('dispensed_at');
+      item['sent_at'] = DateTime.now().toIso8601String();
+      await _save();
+      return 1;
+    }
+    return 0;
+  }
+
+  /// Fills the doctor's name on a prescription when it is missing or generic.
+  Future<int> attachDoctorName(String id, String name) async {
+    await _ensureLoaded();
+    final list = _getList('prescriptions');
+    final index = list.indexWhere((m) => m['id'] == id);
+    if (index >= 0) {
+      final item = list[index];
+      final current = (item['doctor_name'] as String? ?? '').trim();
+      if (current.isEmpty || current == 'Unknown') {
+        item['doctor_name'] = name;
+        await _save();
+      }
+      return 1;
+    }
+    return 0;
+  }
+
+  /// Doctor explicitly sends a prescription to the pharmacy.
+  Future<int> markPrescriptionSent(String id) async {
+    await _ensureLoaded();
+    final list = _getList('prescriptions');
+    final index = list.indexWhere((m) => m['id'] == id);
+    if (index >= 0) {
+      final item = list[index];
+      item['sent_to_pharmacy'] = 1;
+      item['sent_at'] = DateTime.now().toIso8601String();
+      await _save();
+      return 1;
+    }
+    return 0;
+  }
+
+  /// Attaches the pharmacist's name to a prescription (keeps the first one
+  /// assigned, so the printer stamp stays the same pharmacist).
+  Future<int> markPrescriptionPharmacist(String id, String name) async {
+    await _ensureLoaded();
+    final list = _getList('prescriptions');
+    final index = list.indexWhere((m) => m['id'] == id);
+    if (index >= 0) {
+      final item = list[index];
+      if ((item['pharmacist_name'] as String? ?? '').isEmpty) {
+        item['pharmacist_name'] = name;
+        await _save();
+        return 1;
+      }
+      return 1;
+    }
+    return 0;
+  }
+
+  /// Queue shown on the pharmacy screen / served to the pharmacist device.
+  /// Only prescriptions the doctor explicitly sent appear, with the patient
+  /// name so the pharmacist can identify and search for them.
+  Future<List<Map<String, dynamic>>> getPharmacyQueue() async {
+    await _ensureLoaded();
+    final list = _getList('prescriptions')
+        .where((m) => (m['sent_to_pharmacy'] ?? 1) == 1)
+        .toList();
+    list.sort((a, b) {
+      final sa = (a['status'] as String?) ?? 'pending';
+      final sb = (b['status'] as String?) ?? 'pending';
+      if (sa == sb) {
+        return ((b['created_at'] as String?) ?? '').compareTo((a['created_at'] as String?) ?? '');
+      }
+      return sa == 'pending' ? -1 : 1;
+    });
+    final patients = _getList('patients');
+    for (final rx in list) {
+      final patient = patients.cast<Map<String, dynamic>>()
+          .where((p) => p['id'] == rx['patient_id'])
+          .firstOrNull;
+      if (patient != null) {
+        rx['patient_name'] =
+            '${patient['first_name'] ?? ''} ${patient['last_name'] ?? ''}'.trim();
+        rx['patient_phone'] = patient['phone'] ?? '';
+      }
+    }
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  Future<int> updatePrescriptionStatus(
+    String id, {
+    required String status,
+    String? dispensedBy,
+    String? dispensedAt,
+  }) async {
+    await _ensureLoaded();
+    final list = _getList('prescriptions');
+    final index = list.indexWhere((m) => m['id'] == id);
+    if (index >= 0) {
+      final item = list[index];
+      item['status'] = status;
+      if (dispensedBy != null) item['dispensed_by'] = dispensedBy;
+      if (dispensedAt != null) item['dispensed_at'] = dispensedAt;
+      item['updated_at'] = DateTime.now().toIso8601String();
+      await _save();
+      return 1;
+    }
+    return 0;
+  }
+
+  Future<int> deletePrescriptionItem(String id, int itemIndex) async {
+    await _ensureLoaded();
+    final list = _getList('prescriptions');
+    final index = list.indexWhere((m) => m['id'] == id);
+    if (index >= 0) {
+      final items = (list[index]['items'] as List).toList();
+      if (itemIndex >= 0 && itemIndex < items.length) {
+        items.removeAt(itemIndex);
+        list[index]['items'] = items;
+      }
+      await _save();
+      return 1;
+    }
+    return 0;
   }
 
   Future<List<Map<String, dynamic>>> getAllUsers() async {
@@ -425,5 +622,164 @@ class DatabaseHelper {
         .toList();
     bookings.sort((a, b) => a.time.compareTo(b.time));
     return bookings;
+  }
+
+  // ---- Pharmacy inventory ----
+
+  Future<List<Map<String, dynamic>>> getInventory() async {
+    await _ensureLoaded();
+    final items = _getList('pharmacy_inventory').cast<Map<String, dynamic>>().toList();
+    items.sort((a, b) =>
+        (a['medicine_name'] as String? ?? '').compareTo(b['medicine_name'] as String? ?? ''));
+    return items;
+  }
+
+  Future<int> upsertInventoryItem(Map<String, dynamic> item) async {
+    await _ensureLoaded();
+    final list = _getList('pharmacy_inventory');
+    final idx = list.indexWhere((m) => m['id'] == item['id']);
+    if (idx >= 0) {
+      list[idx] = item;
+    } else {
+      list.add(item);
+    }
+    await _save();
+    return 1;
+  }
+
+  Future<int> deleteInventoryItem(String id) async {
+    await _ensureLoaded();
+    _deleteFromList('pharmacy_inventory', 'id', id);
+    await _save();
+    return 1;
+  }
+
+  /// Adds [delta] to every stock entry whose medicine name matches
+  /// [medicineName] (case-insensitive). Returns how many entries matched.
+  Future<int> adjustInventory(String medicineName, int delta) async {
+    await _ensureLoaded();
+    final name = medicineName.trim().toLowerCase();
+    if (name.isEmpty) return 0;
+    final list = _getList('pharmacy_inventory');
+    int matched = 0;
+    for (final m in list) {
+      if ((m['medicine_name'] as String? ?? '').trim().toLowerCase() == name) {
+        m['quantity'] = ((m['quantity'] as num?)?.toInt() ?? 0) + delta;
+        matched++;
+      }
+    }
+    await _save();
+    return matched;
+  }
+
+  Future<int> getLowStockCount(int threshold) async {
+    await _ensureLoaded();
+    final list = _getList('pharmacy_inventory');
+    return list.where((m) => ((m['quantity'] as num?)?.toInt() ?? 0) <= threshold).length;
+  }
+
+  /// Clinic statistics between [start] and [end] (inclusive).
+  /// Counts new patients, visits (examinations), unique visiting patients,
+  /// prescriptions (sent + dispensed), investigations, abnormal results and
+  /// the most common diagnoses, with a per-day breakdown.
+  Future<Map<String, dynamic>> getClinicStats(DateTime start, DateTime end) async {
+    await _ensureLoaded();
+    String dayKey(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final from = dayKey(start);
+    final to = dayKey(end);
+    final daily = <String, Map<String, dynamic>>{};
+    void bump(String date, String field) {
+      daily.putIfAbsent(date, () => {
+        'date': date,
+        'new_patients': 0,
+        'visits': 0,
+        'unique_patients': <String>{},
+        'prescriptions': 0,
+        'dispensed': 0,
+        'investigations': 0,
+      });
+      if (field == 'unique_patients') return;
+      daily[date]![field] = (daily[date]![field] as int) + 1;
+    }
+
+    final patients = _getList('patients');
+    final newPatients = <Map<String, dynamic>>[];
+    for (final p in patients) {
+      final created = (p['created_at'] as String? ?? '').split('T').first;
+      if (created.compareTo(from) >= 0 && created.compareTo(to) <= 0) {
+        newPatients.add(p);
+        if (created.compareTo(from) >= 0) bump(created, 'new_patients');
+      }
+    }
+
+    final exams = _getList('examinations');
+    final diagnoses = <String, int>{};
+    int examinationsCount = 0;
+    final visitingIds = <String>{};
+    for (final e in exams) {
+      final date = (e['visit_date'] as String? ?? '').split('T').first;
+      if (date.compareTo(from) >= 0 && date.compareTo(to) <= 0) {
+        examinationsCount++;
+        visitingIds.add(e['patient_id'] as String? ?? '');
+        bump(date, 'visits');
+        final diag = (e['diagnosis'] as String? ?? '').trim();
+        if (diag.isNotEmpty) diagnoses[diag] = (diagnoses[diag] ?? 0) + 1;
+      }
+    }
+
+    final rxs = _getList('prescriptions');
+    int prescriptionsCount = 0, dispensedCount = 0;
+    for (final rx in rxs) {
+      final date = (rx['created_at'] as String? ?? '').split('T').first;
+      if (date.compareTo(from) >= 0 && date.compareTo(to) <= 0) {
+        prescriptionsCount++;
+        if (rx['status'] == 'dispensed') dispensedCount++;
+        bump(date, 'prescriptions');
+        if (rx['status'] == 'dispensed') bump(date, 'dispensed');
+      }
+    }
+
+    final invs = _getList('investigations');
+    int invCount = 0, abnormalCount = 0;
+    for (final i in invs) {
+      final date = (i['investigation_date'] as String? ?? '').split('T').first;
+      if (date.compareTo(from) >= 0 && date.compareTo(to) <= 0) {
+        invCount++;
+        if (i['is_abnormal'] == true) abnormalCount++;
+        bump(date, 'investigations');
+      }
+    }
+
+    final sortedDiagnoses = diagnoses.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final dailyList = daily.values.toList()
+      ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+    int male = 0, female = 0;
+    for (final p in newPatients) {
+      if (p['gender'] == 'Male') male++;
+      else if (p['gender'] == 'Female') female++;
+    }
+
+    return {
+      'from': from,
+      'to': to,
+      'new_patients': newPatients.length,
+      'new_male': male,
+      'new_female': female,
+      'examinations': examinationsCount,
+      'unique_visits': visitingIds.length,
+      'prescriptions': prescriptionsCount,
+      'dispensed': dispensedCount,
+      'investigations': invCount,
+      'abnormal': abnormalCount,
+      'top_diagnoses': sortedDiagnoses.take(8).map((e) => {'diagnosis': e.key, 'count': e.value}).toList(),
+      'daily': dailyList.map((d) {
+        final m = Map<String, dynamic>.from(d);
+        m['unique_patients'] = (d['unique_patients'] as Set).length;
+        return m;
+      }).toList(),
+    };
   }
 }

@@ -20,7 +20,7 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
   final _keyCtrl = TextEditingController();
   final _ipCtrl = TextEditingController();
   final _portCtrl = TextEditingController();
-  bool _isPrimary = true;
+  String _device = 'doctor'; // 'doctor' | 'secretary' | 'pharmacist'
   bool _error = false;
   String _message = '';
   bool _activating = false;
@@ -56,7 +56,7 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
   Future<void> _activate() async {
     final key = _keyCtrl.text.trim();
 
-    if (_isPrimary) {
+    if (_device == 'doctor') {
       final result = await LicenseManager.activatePrimary(key);
       if (!result.ok) {
         setState(() { _error = true; _message = result.message; });
@@ -87,6 +87,8 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
       }
       final grantMachine = res['machineId']?.toString() ?? machineId;
       final result = await LicenseManager.activateSecondary(key, grantMachine);
+      await AppStorage.write('doctor_ip', ip);
+      await AppStorage.write('doctor_port', '$port');
       setState(() => _activating = false);
       if (!result.ok) {
         setState(() { _error = true; _message = result.message; });
@@ -175,26 +177,34 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
                       children: [
                         Expanded(
                           child: ChoiceChip(
-                            label: const Text('Doctor (1st device)'),
-                            selected: _isPrimary,
-                            onSelected: (_) => setState(() => _isPrimary = true),
+                            label: const Text('Doctor\n(device 1)'),
+                            selected: _device == 'doctor',
+                            onSelected: (_) => setState(() => _device = 'doctor'),
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: ChoiceChip(
-                            label: const Text('Secretary (2nd device)'),
-                            selected: !_isPrimary,
-                            onSelected: (_) => setState(() => _isPrimary = false),
+                            label: const Text('Secretary\n(device 2)'),
+                            selected: _device == 'secretary',
+                            onSelected: (_) => setState(() => _device = 'secretary'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Text('Pharmacist\n(device 3)'),
+                            selected: _device == 'pharmacist',
+                            onSelected: (_) => setState(() => _device = 'pharmacist'),
                           ),
                         ),
                       ],
                     ),
-                    if (!_isPrimary) ...[
+                    if (_device != 'doctor') ...[
                       const SizedBox(height: 14),
-                      const Text(
-                        'The secretary device must be on the same network as the doctor app (LAN or Wi-Fi).',
-                        style: TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+                      Text(
+                        'This device must be on the same network as the doctor app (LAN or Wi-Fi) to claim a seat.',
+                        style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
                       ),
                       const SizedBox(height: 10),
                       Row(
@@ -253,9 +263,9 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
                     ),
                     if (_message.isNotEmpty && !_error) ...[
                       const SizedBox(height: 10),
-                      const Text(
-                        'License activated',
-                        style: TextStyle(color: AppTheme.successColor, fontSize: 13, fontWeight: FontWeight.w600),
+                      Text(
+                        _message,
+                        style: const TextStyle(color: AppTheme.successColor, fontSize: 13, fontWeight: FontWeight.w600),
                       ),
                     ],
                   ],

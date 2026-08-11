@@ -31,6 +31,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         if (mounted) {
           if (role == null) context.push('/role');
           else if (role == 'secretary') context.go('/secretary');
+          else if (role == 'pharmacist') context.go('/pharmacy');
           else context.go('/');
         }
         return;
@@ -43,6 +44,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         if (mounted) {
           if (role == null) context.push('/role');
           else if (role == 'secretary') context.go('/secretary');
+          else if (role == 'pharmacist') context.go('/pharmacy');
           else context.go('/');
         }
         return;

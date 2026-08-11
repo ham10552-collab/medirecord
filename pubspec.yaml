@@ -32,6 +32,8 @@ dependencies:
   firebase_core_platform_interface: ^8.0.0
   localstorage: ^5.0.0
   shared_preferences: ^2.3.0
+  flutter_local_notifications: ^22.3.0
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:

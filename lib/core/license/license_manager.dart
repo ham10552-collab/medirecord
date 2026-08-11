@@ -54,8 +54,9 @@ class LicenseRecord {
 ///    seat #1 with no network requirement.
 ///  - The clinic's secretary device requests the key's remaining seat from the
 ///    primary over the existing HTTP channel (works over LAN or Wi-Fi). The
-///    primary grants a seat only up to 2 machines total.
-///  - Both roles on a given machine share that machine's license.
+///    primary grants a seat only up to 3 machines total (doctor + secretary +
+///    pharmacist).
+///  - All roles on a given machine share that machine's license.
 class LicenseManager {
   LicenseManager._();
 
@@ -204,7 +205,7 @@ class LicenseManager {
 
     if (seats.length >= AppConstants.maxLicenseSeats) {
       return const ActivationResult.fail(
-          'License seats exhausted (maximum 2 machines per key).');
+          'License seats exhausted (maximum 3 machines per key).');
     }
 
     seats.add(requestingMachineId);

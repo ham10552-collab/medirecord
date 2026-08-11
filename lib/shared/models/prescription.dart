@@ -39,6 +39,13 @@ class Prescription {
   final String notes;
   final String createdAt;
   final String updatedAt;
+  final String status;
+  final String? dispensedBy;
+  final String? dispensedAt;
+  final String? pharmacistName;
+  final String? doctorHost;
+  final bool sentToPharmacy;
+  final String? sentAt;
 
   Prescription({
     required this.id,
@@ -49,7 +56,16 @@ class Prescription {
     this.notes = '',
     required this.createdAt,
     required this.updatedAt,
+    this.status = 'pending',
+    this.dispensedBy,
+    this.dispensedAt,
+    this.pharmacistName,
+    this.doctorHost,
+    this.sentToPharmacy = false,
+    this.sentAt,
   });
+
+  bool get isDispensed => status == 'dispensed';
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -60,6 +76,13 @@ class Prescription {
         'notes': notes,
         'created_at': createdAt,
         'updated_at': updatedAt,
+        'status': status,
+        'dispensed_by': dispensedBy,
+        'dispensed_at': dispensedAt,
+        'pharmacist_name': pharmacistName,
+        'doctor_host': doctorHost,
+        'sent_to_pharmacy': sentToPharmacy ? 1 : 0,
+        'sent_at': sentAt,
       };
 
   factory Prescription.fromMap(Map<String, dynamic> map) => Prescription(
@@ -74,5 +97,12 @@ class Prescription {
         notes: map['notes'] as String? ?? '',
         createdAt: map['created_at'] as String,
         updatedAt: map['updated_at'] as String,
+        status: map['status'] as String? ?? 'pending',
+        dispensedBy: map['dispensed_by'] as String?,
+        dispensedAt: map['dispensed_at'] as String?,
+        pharmacistName: map['pharmacist_name'] as String?,
+        doctorHost: map['doctor_host'] as String?,
+        sentToPharmacy: (map['sent_to_pharmacy'] as num?)?.toInt() == 1,
+        sentAt: map['sent_at'] as String?,
       );
 }
