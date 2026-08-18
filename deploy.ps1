@@ -45,7 +45,7 @@ Write-Host "==> Swapping into place..."
 if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
 if (Test-Path $target) { [System.IO.Directory]::Move($target, $backup) }
 [System.IO.Directory]::Move($temp, $target)
-Remove-Item $backup -Recurse -Force
+if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
 
 Write-Host "==> Launching..."
 Start-Process (Join-Path $target "medirecord.exe")

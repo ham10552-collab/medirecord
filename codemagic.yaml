@@ -1,16 +1,13 @@
 workflows:
   ios-build:
     name: Build iOS IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 60
     environment:
       flutter: stable
       xcode: latest
     scripts:
-      - echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
       - flutter pub get
-      - flutter build ios --release --no-codesign
+      - flutter build ipa --release --no-codesign
     artifacts:
-      - build/ios/iphoneos/Runner.app
-    publishing:
-      email:
-        recipients:
-          - your@email.com
+      - build/ios/ipa/*.ipa

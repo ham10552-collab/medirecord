@@ -7,7 +7,7 @@ class AppConstants {
 
   /// Maximum machines one license key can be bound to
   /// (1 = doctor PC, 2 = doctor PC + secretary PC, 3 = + pharmacy PC).
-  static const int maxLicenseSeats = 3;
+  static const int maxLicenseSeats = 4;
 
   static final List<Map<String, String>> customDrugs = <Map<String, String>>[];
 

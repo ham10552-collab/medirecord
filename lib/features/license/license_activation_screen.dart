@@ -20,7 +20,7 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
   final _keyCtrl = TextEditingController();
   final _ipCtrl = TextEditingController();
   final _portCtrl = TextEditingController();
-  String _device = 'doctor'; // 'doctor' | 'secretary' | 'pharmacist'
+  String _device = 'doctor'; // 'doctor' | 'secretary' | 'pharmacist' | 'lab'
   bool _error = false;
   String _message = '';
   bool _activating = false;
@@ -58,6 +58,31 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
 
     if (_device == 'doctor') {
       final result = await LicenseManager.activatePrimary(key);
+      if (!result.ok) {
+        setState(() { _error = true; _message = result.message; });
+        return;
+      }
+      setState(() => _message = result.message);
+    } else if (_device == 'pharmacist') {
+      // The pharmacy works with ALL doctors in the system - the doctor
+      // addresses are added later in the pharmacy screen (Manage doctors).
+      setState(() { _activating = true; _message = ''; });
+      final machineId = await DeviceIdentity.fingerprint();
+      final result = await LicenseManager.activateSecondary(key, machineId);
+      setState(() => _activating = false);
+      if (!result.ok) {
+        setState(() { _error = true; _message = result.message; });
+        return;
+      }
+      setState(() => _message = result.message);
+    } else if (_device == 'lab') {
+      // Lab technician: activates locally exactly like the pharmacist -
+      // no single doctor IP needed, the lab then pulls from ALL doctors
+      // added in the Lab screen.
+      setState(() { _activating = true; _message = ''; });
+      final machineId = await DeviceIdentity.fingerprint();
+      final result = await LicenseManager.activateSecondary(key, machineId);
+      setState(() => _activating = false);
       if (!result.ok) {
         setState(() { _error = true; _message = result.message; });
         return;
@@ -107,6 +132,13 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
     return Scaffold(
       body: LuxNavyBackdrop(
         showBack: true,
+        onBack: () {
+          if (context.canPop()) {
+            Navigator.pop(context);
+          } else {
+            context.go('/role');
+          }
+        },
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -173,38 +205,38 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
                       onChanged: (_) => setState(() { _error = false; _message = ''; }),
                     ),
                     const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ChoiceChip(
-                            label: const Text('Doctor\n(device 1)'),
-                            selected: _device == 'doctor',
-                            onSelected: (_) => setState(() => _device = 'doctor'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ChoiceChip(
-                            label: const Text('Secretary\n(device 2)'),
-                            selected: _device == 'secretary',
-                            onSelected: (_) => setState(() => _device = 'secretary'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ChoiceChip(
-                            label: const Text('Pharmacist\n(device 3)'),
-                            selected: _device == 'pharmacist',
-                            onSelected: (_) => setState(() => _device = 'pharmacist'),
-                          ),
-                        ),
-                      ],
+                    _deviceOption(
+                      device: 'doctor',
+                      icon: Icons.medical_services_outlined,
+                      title: 'Doctor',
+                      subtitle: 'Device 1 - main computer with the license key',
                     ),
-                    if (_device != 'doctor') ...[
+                    const SizedBox(height: 8),
+                    _deviceOption(
+                      device: 'secretary',
+                      icon: Icons.supervisor_account_outlined,
+                      title: 'Secretary',
+                      subtitle: 'Device 2 - connects to the doctor over the network',
+                    ),
+                    const SizedBox(height: 8),
+                    _deviceOption(
+                      device: 'pharmacist',
+                      icon: Icons.local_pharmacy_outlined,
+                      title: 'Pharmacist',
+                      subtitle: 'Device 3 - connects to all doctors',
+                    ),
+                    const SizedBox(height: 8),
+                    _deviceOption(
+                      device: 'lab',
+                      icon: Icons.science_outlined,
+                      title: 'Lab Technician',
+                      subtitle: 'Device 4 - connects to all doctors',
+                    ),
+                    if (_device == 'secretary') ...[
                       const SizedBox(height: 14),
-                      Text(
-                        'This device must be on the same network as the doctor app (LAN or Wi-Fi) to claim a seat.',
-                        style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+                      const Text(
+                        'Enter the IP of the doctor that owns this license key. The seat is claimed once over the network (LAN/Wi-Fi); afterwards this machine works with the configured doctor PC.',
+                        style: TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
                       ),
                       const SizedBox(height: 10),
                       Row(
@@ -234,6 +266,34 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
                             ),
                           ),
                         ],
+                      ),
+                    ] else if (_device == 'pharmacist' || _device == 'lab') ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.goldColor.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _device == 'pharmacist' ? Icons.local_pharmacy : Icons.biotech,
+                              size: 18,
+                              color: AppTheme.goldDeep,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _device == 'pharmacist'
+                                    ? 'The pharmacy connects to all doctors - add each doctor IP later from the Pharmacy screen (Manage doctors).'
+                                    : 'The lab connects to all doctors - no single doctor IP needed. Add each doctor later from the Lab screen (Manage doctors).',
+                                style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                     const SizedBox(height: 20),
@@ -270,6 +330,71 @@ class _LicenseActivationScreenState extends ConsumerState<LicenseActivationScree
                     ],
                   ],
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _deviceOption({
+    required String device,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
+    final selected = _device == device;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => setState(() => _device = device),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected ? AppTheme.goldColor.withValues(alpha: 0.08) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? AppTheme.goldColor : AppTheme.dividerColor,
+              width: selected ? 1.6 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppTheme.goldColor.withValues(alpha: 0.15)
+                      : AppTheme.primaryColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 20, color: selected ? AppTheme.goldDeep : AppTheme.primaryColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.navy),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                size: 20,
+                color: selected ? AppTheme.goldDeep : AppTheme.dividerColor,
               ),
             ],
           ),

@@ -326,11 +326,12 @@ class LuxBrandHeader extends StatelessWidget {
       children: [
         MedicalCrossFigure(size: crossSize),
         const SizedBox(height: 18),
-        ShaderMask(
-          shaderCallback: (bounds) => AppTheme.goldTextGradient.createShader(bounds),
-          child: Text(
-            title,
-            style: AppTheme.displayStyle(size: 34, color: Colors.white, weight: FontWeight.w800),
+        Text(
+          title,
+          style: AppTheme.displayStyle(
+            size: 34,
+            color: Colors.white,
+            weight: FontWeight.w800,
           ),
         ),
         if (tagline != null) ...[
@@ -354,7 +355,13 @@ class LuxBrandHeader extends StatelessWidget {
 class LuxNavyBackdrop extends StatelessWidget {
   final Widget child;
   final bool showBack;
-  const LuxNavyBackdrop({super.key, required this.child, this.showBack = false});
+  final VoidCallback? onBack;
+  const LuxNavyBackdrop({
+    super.key,
+    required this.child,
+    this.showBack = false,
+    this.onBack,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -376,6 +383,17 @@ class LuxNavyBackdrop extends StatelessWidget {
             ),
             const Positioned(top: 28, right: 30, child: SparkleFigure(size: 14)),
             const Positioned(bottom: 70, left: 34, child: SparkleFigure(size: 10)),
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Transform.flip(flipY: true, child: CornerOrnament(size: 30, color: AppTheme.goldLight.withValues(alpha: 0.6))),
+            ),
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: CornerOrnament(size: 30, color: AppTheme.goldLight.withValues(alpha: 0.6)),
+            ),
+            Center(child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: child)),
             if (showBack)
               Positioned(
                 top: 26,
@@ -392,7 +410,7 @@ class LuxNavyBackdrop extends StatelessWidget {
                     ),
                     child: InkWell(
                       customBorder: const CircleBorder(),
-                      onTap: () => Navigator.maybePop(context),
+                      onTap: onBack ?? () => Navigator.maybePop(context),
                       child: const Icon(
                         Icons.arrow_back_ios_new,
                         size: 18,
@@ -402,17 +420,6 @@ class LuxNavyBackdrop extends StatelessWidget {
                   ),
                 ),
               ),
-            Positioned(
-              top: 12,
-              left: 12,
-              child: Transform.flip(flipY: true, child: CornerOrnament(size: 30, color: AppTheme.goldLight.withValues(alpha: 0.6))),
-            ),
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: CornerOrnament(size: 30, color: AppTheme.goldLight.withValues(alpha: 0.6)),
-            ),
-            Center(child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: child)),
           ],
         ),
       ),

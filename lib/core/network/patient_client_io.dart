@@ -112,6 +112,51 @@ class PatientClient {
     }
   }
 
+  /// Fetches pending lab requests from a doctor's install (lab device).
+  static Future<(List<dynamic>, String?)> fetchLabTests(
+      String ip, int port,
+      {int timeoutSec = 8}) async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = Duration(seconds: timeoutSec);
+      final request =
+          await client.getUrl(Uri.parse('http://$ip:$port/api/lab/tests'));
+      final response = await request.close();
+      final body = await response.cast<List<int>>().transform(utf8.decoder).join();
+      client.close();
+      if (response.statusCode != 200) {
+        return (const [], 'Response ${response.statusCode}');
+      }
+      final decoded = json.decode(body);
+      if (decoded is List) return (decoded, null);
+      return (const [], 'Unexpected response');
+    } catch (e) {
+      return (const [], _extractError(e) ?? 'Could not reach the doctor app');
+    }
+  }
+
+  /// Sends completed lab results back to the requesting doctor.
+  static Future<Map<String, dynamic>> sendLabResult(
+    Map<String, dynamic> request,
+    String ip,
+    int port,
+  ) async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 8);
+      final req = await client.postUrl(Uri.parse('http://$ip:$port/api/lab/result'));
+      req.headers.contentType = ContentType.json;
+      req.write(json.encode(request));
+      final response = await req.close();
+      final body = await response.cast<List<int>>().transform(utf8.decoder).join();
+      client.close();
+      final decoded = json.decode(body) as Map<String, dynamic>;
+      return {'status': response.statusCode == 200 ? 'ok' : 'error', ...decoded};
+    } catch (e) {
+      return {'status': 'error', 'message': 'Could not reach the doctor app over the network: $e'};
+    }
+  }
+
   /// Fetches the doctor's queue statuses (waiting / with doctor / done) for
   /// the patients the secretary sent. Returns null when the doctor PC cannot
   /// be reached, an (possibly empty) map on success.

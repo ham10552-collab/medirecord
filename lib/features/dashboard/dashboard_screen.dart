@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,15 +8,19 @@ import '../../core/theme/theme_provider.dart';
 import '../../core/database/database_provider.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/providers/license_provider.dart';
-import '../../core/license/license_manager.dart';
 import '../../core/utils/constants.dart';
 import '../../core/network/patient_server.dart';
 import '../../core/network/pharmacy_notifications.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/utils/app_storage.dart';
 import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/app_shell.dart';
+import '../../shared/widgets/empty_state.dart';
+import '../../shared/widgets/global_search.dart';
 import '../../shared/widgets/luxury_figures.dart';
-import '../../shared/models/patient.dart';
+import '../../shared/widgets/skeleton.dart';
+
+/// Dashboard shown for the doctor role.
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -30,7 +34,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   final Set<String> _seenPatientIds = {};
   final List<Map<String, dynamic>> _alerts = [];
   bool _notificationsSeeded = false;
-  int _lastPollCount = 0;
   Timer? _pollTimer;
   bool _doctorNameChecked = false;
 
@@ -106,7 +109,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   Future<void> _refreshCount() async {
     final count = await DatabaseHelper().getPatientCount();
-    _lastPollCount = count;
     if (mounted) setState(() => _livePatientCount = count);
   }
 
@@ -140,7 +142,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             !_alerts.any((a) => a['id'] == p.id))
         .toList();
     setState(() {
-      _lastPollCount = patients.length;
       _seenPatientIds.addAll(patients.map((p) => p.id));
     });
     for (final p in fresh) {
@@ -191,7 +192,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         alerts: snapshot,
         onOpenPatient: (id) {
           Navigator.pop(sheetCtx);
-          context.push('/patients/$id');
+          if (id.startsWith('lab_')) {
+            context.push(
+              '/lab-orders?highlight=${Uri.encodeComponent(id.substring(4))}',
+            );
+          } else {
+            context.push('/patients/$id');
+          }
         },
       ),
     );
@@ -208,6 +215,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final genderDist = ref.watch(genderDistributionProvider);
     final recentExams = ref.watch(recentExaminationsProvider);
+    final weeklyActivity = ref.watch(weeklyActivityProvider);
+    final comparisonStats = ref.watch(comparisonStatsProvider);
+    final activity = ref.watch(activityProvider);
     final themeMode = ref.watch(themeModeProvider);
     final licenseStatus = ref.watch(licenseStatusProvider);
     final server = ref.watch(patientServerProvider);
@@ -230,7 +240,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.5)),
               ),
-              child: const Text('v24',
+              child: const Text('v25',
                   style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppTheme.goldDeep)),
             ),
           ),
@@ -239,6 +249,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             tooltip: themeMode == ThemeMode.dark ? 'Light Mode' : 'Dark Mode',
             onPressed: () => ref.read(themeModeProvider.notifier).toggle(),
           ),
+          PopupMenuButton<AppDisplayDensity>(
+            tooltip: 'Display density',
+            icon: const Icon(Icons.density_medium),
+            onSelected: (d) => ref.read(displayDensityProvider.notifier).setDensity(d),
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: AppDisplayDensity.compact,
+                child: Text('Compact'),
+              ),
+              PopupMenuItem(
+                value: AppDisplayDensity.cozy,
+                child: Text('Cozy'),
+              ),
+              PopupMenuItem(
+                value: AppDisplayDensity.roomy,
+                child: Text('Roomy'),
+              ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.calendar_today_outlined),
             tooltip: 'Bookings',
@@ -246,7 +275,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.search),
-            onPressed: () => context.push('/patients'),
+            tooltip: 'Global search',
+            onPressed: () => showGlobalSearch(context),
           ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -257,6 +287,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     hasNew ? Icons.notifications_active : Icons.notifications_none,
                     color: hasNew ? AppTheme.goldColor : null,
                   ),
+                  tooltip: hasNew ? 'Notifications (new)' : 'Notifications',
                   onPressed: () => _openNotifications(),
                 ),
                 if (hasNew)
@@ -281,7 +312,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ),
         ],
       ),
-      drawer: const AppDrawer(),
+      drawer: AppShell.usesFixedNav(context) ? null : const AppDrawer(),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
@@ -306,8 +337,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     Expanded(
                       child: Text(
                         count >= AppConstants.maxTrialPatients
-                            ? 'Trial limit reached — Activate license to continue'
-                            : 'Free Trial — $count/${AppConstants.maxTrialPatients} patients used',
+                            ? 'Trial limit reached â€” Activate license to continue'
+                            : 'Free Trial â€” $count/${AppConstants.maxTrialPatients} patients used',
                         style: TextStyle(
                           fontSize: 13,
                           color: count >= AppConstants.maxTrialPatients ? const Color(0xFFE65100) : const Color(0xFF2E7D32),
@@ -338,7 +369,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
-                Expanded(child: _actionCard(Icons.person_add_alt_1, 'Add Patient', AppTheme.primaryColor, () => context.push('/patients'))),
+                Expanded(child: _actionCard(Icons.person_add_alt_1, 'Add Patient', AppTheme.primaryColor, () => context.push('/patients/add'))),
                 const SizedBox(width: 12),
                 Expanded(child: _actionCard(Icons.calendar_month, 'Bookings', AppTheme.goldColor, () => context.push('/bookings'))),
                 const SizedBox(width: 12),
@@ -360,6 +391,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     '$count',
                     AppTheme.primaryColor,
                     () => context.push('/patients'),
+                    delta: '+${comparisonStats.valueOrNull?['new_patients_delta'] ?? 0} new',
+                    deltaUp: (comparisonStats.valueOrNull?['new_patients_delta'] ?? 0) >= 0,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -376,7 +409,35 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               child: _genderRatioCard(male, female, total: count),
             ),
           ],
-          if (recentExams.valueOrNull?.isNotEmpty ?? false) ...[
+          const SizedBox(height: 20),
+          const LuxSectionTitle(title: 'Clinic Overview', icon: Icons.dashboard_customize_outlined),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _weeklyChartCard(weeklyActivity),
+          ),
+          const SizedBox(height: 20),
+          const LuxSectionTitle(title: 'Recent Activity', icon: Icons.history_rounded),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _activityPanel(activity),
+          ),
+          if ((recentExams.valueOrNull ?? []).isEmpty) ...[
+            const SizedBox(height: 20),
+            const LuxSectionTitle(title: 'Recent Examinations', icon: Icons.assignment_rounded),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: EmptyState(
+                icon: Icons.medical_services_outlined,
+                title: 'No examinations yet',
+                message: 'Recent examinations will appear here once you record your first one.',
+                actionLabel: 'Start an Examination',
+                onAction: () => context.push('/patients'),
+              ),
+            ),
+          ] else ...[
             const SizedBox(height: 20),
             const LuxSectionTitle(title: 'Recent Examinations', icon: Icons.assignment_rounded),
             const SizedBox(height: 10),
@@ -449,7 +510,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     const SizedBox(width: 6),
                     Text(
                       _greeting().toUpperCase(),
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: AppTheme.goldLight,
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -560,13 +621,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Widget _actionCard(IconData icon, String label, Color color, VoidCallback onTap) {
+    final vd = Theme.of(context).visualDensity;
+    final padV = vd == VisualDensity.compact
+        ? 10.0
+        : (vd == VisualDensity.comfortable ? 26.0 : 18.0);
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
+          padding: EdgeInsets.symmetric(vertical: padV, horizontal: 8),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -595,9 +660,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _statCard(IconData icon, String label, String value, Color color, VoidCallback? onTap) {
+  Widget _statCard(IconData icon, String label, String value, Color color, VoidCallback? onTap,
+      {String? delta, bool deltaUp = true}) {
+    final vd = Theme.of(context).visualDensity;
+    final pad = vd == VisualDensity.compact
+        ? 8.0
+        : (vd == VisualDensity.comfortable ? 20.0 : 14.0);
     final child = Container(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -626,7 +696,29 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             child: Icon(icon, size: 20, color: color),
           ),
           const SizedBox(height: 8),
-          Text(value, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppTheme.navy)),
+          Text(value, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppTheme.navy)),
+          if (delta != null) ...[
+            const SizedBox(height: 3),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  deltaUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                  size: 13,
+                  color: deltaUp ? AppTheme.successColor : AppTheme.warningColor,
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  '$delta vs last week',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: deltaUp ? AppTheme.successColor : AppTheme.warningColor,
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 2),
           Text(label, style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary, letterSpacing: 0.2)),
         ],
@@ -636,6 +728,106 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(16), child: child);
     }
     return child;
+  }
+
+  Widget _activityPanel(AsyncValue<List<Map<String, dynamic>>> activity) {
+    final items = activity.valueOrNull ?? const [];
+    if (items.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.35)),
+        ),
+        child: const Column(
+          children: [
+            Icon(Icons.history, size: 36, color: AppTheme.textSecondary),
+            SizedBox(height: 8),
+            Text(
+              'No activity yet',
+              style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            ),
+            SizedBox(height: 2),
+            Text(
+              'Actions like adding patients, exams and prescriptions will appear here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0)
+              const Divider(height: 1, indent: 52, endIndent: 12, color: AppTheme.goldLight),
+            _activityRow(items[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _activityRow(Map<String, dynamic> item) {
+    final type = (item['type'] as String? ?? '');
+    final (icon, color) = switch (type) {
+      'patient' => (Icons.person_add_alt_1, AppTheme.primaryColor),
+      'examination' => (Icons.assignment_rounded, AppTheme.secondaryColor),
+      'booking' => (Icons.event_available, AppTheme.goldDeep),
+      'prescription' => (Icons.medication_outlined, const Color(0xFF2E7D32)),
+      'lab' => (Icons.science_outlined, const Color(0xFF6A1B9A)),
+      'department' => (Icons.business_outlined, const Color(0xFF37474F)),
+      _ => (Icons.history, AppTheme.textSecondary),
+    };
+    return ListTile(
+      dense: true,
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, size: 17, color: color),
+      ),
+      title: Text(
+        item['title'] as String? ?? '',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.navy),
+      ),
+      subtitle: Text(
+        item['detail'] as String? ?? '',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 11.5),
+      ),
+      trailing: Text(
+        _relativeTime(item['at'] as String? ?? ''),
+        style: const TextStyle(fontSize: 10.5, color: AppTheme.textSecondary),
+      ),
+    );
+  }
+
+  String _relativeTime(String iso) {
+    try {
+      final then = DateTime.parse(iso);
+      final diff = DateTime.now().difference(then);
+      if (diff.inSeconds < 60) return 'just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      if (diff.inDays < 7) return '${diff.inDays}d ago';
+      return '${then.day}/${then.month}';
+    } catch (_) {
+      return '';
+    }
   }
 
   Widget _genderRatioCard(int male, int female, {required int total}) {
@@ -725,6 +917,92 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
+  Widget _weeklyChartCard(AsyncValue<List<Map<String, dynamic>>> weekly) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.35), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.navy.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: weekly.when(
+        data: (days) {
+          final hasData = days.any((d) => (d['visits'] as int? ?? 0) > 0 || (d['prescriptions'] as int? ?? 0) > 0);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const SparkleFigure(size: 13),
+                  const SizedBox(width: 8),
+                  Text('Last 7 Days', style: AppTheme.displayStyle(size: 15, color: AppTheme.navy)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  _legendDot(AppTheme.primaryColor),
+                  const SizedBox(width: 6),
+                  const Text('Visits', style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                  const SizedBox(width: 14),
+                  _legendDot(AppTheme.goldDeep),
+                  const SizedBox(width: 6),
+                  const Text('Prescriptions', style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (!hasData)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 34),
+                  child: Center(
+                    child: Text('No activity this week yet',
+                        style: TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+                  ),
+                )
+              else
+                SizedBox(
+                  height: 128,
+                  width: double.infinity,
+                  child: CustomPaint(painter: _WeeklyBarsPainter(days)),
+                ),
+            ],
+          );
+        },
+        error: (_, __) => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 34),
+          child: Center(
+            child: Text('Error loading activity', style: TextStyle(color: AppTheme.errorColor, fontSize: 12.5)),
+          ),
+        ),
+        loading: () => const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SkeletonBox(width: 140),
+            SizedBox(height: 10),
+            SkeletonBox(width: 200, height: 11),
+            SizedBox(height: 16),
+            SkeletonBox(height: 120, radius: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _legendDot(Color color) {
+    return Container(
+      width: 9,
+      height: 9,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+
   Widget _buildRecentExams(AsyncValue recentExams) {
     return recentExams.when(
       data: (exams) => Container(
@@ -764,9 +1042,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         padding: EdgeInsets.all(16),
         child: Text('Error loading', style: TextStyle(color: AppTheme.errorColor)),
       ),
-      loading: () => const Padding(
-        padding: EdgeInsets.all(16),
-        child: Center(child: CircularProgressIndicator()),
+      loading: () => const SkeletonPulse(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBox(width: 180),
+              SizedBox(height: 10),
+              SkeletonBox(width: 260, height: 11),
+              SizedBox(height: 8),
+              SkeletonBox(width: 220, height: 11),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -815,26 +1104,18 @@ class _IncomingPanel extends StatelessWidget {
           const GoldDivider(),
           Expanded(
             child: alerts.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.notifications_off_outlined, size: 52, color: AppTheme.dividerColor),
-                        SizedBox(height: 12),
-                        Text('No new patients yet', style: TextStyle(color: AppTheme.textSecondary)),
-                        SizedBox(height: 4),
-                        Text('Patients sent by the secretary\nwill appear here',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                      ],
-                    ),
+                ? EmptyState(
+                    icon: Icons.notifications_off_outlined,
+                    title: 'No new patients yet',
+                    message: 'Patients sent by the secretary will appear here in real time.',
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.only(bottom: 20),
                     itemCount: alerts.length,
                     itemBuilder: (context, i) {
                       final a = alerts[i];
-                      final name = (a['name'] as String? ?? 'Patient');
+                      final rawName = ((a['name'] ?? a['patient_name']) as String? ?? '').trim();
+                      final name = rawName.isEmpty ? 'Patient' : rawName;
                       final at = a['at'] as String? ?? '';
                       return Container(
                         margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
@@ -859,10 +1140,37 @@ class _IncomingPanel extends StatelessWidget {
                               style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
                             ),
                           ),
-                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text(
-                            at.length >= 16 ? 'Sent ${at.substring(0, 10)} at ${at.substring(11, 16)}' : 'Sent just now',
-                            style: const TextStyle(fontSize: 11),
+                          title: Text(
+                            name,
+                            style: const TextStyle(
+                              color: AppTheme.goldDeep,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14.5,
+                            ),
+                          ),
+                          subtitle: Row(
+                            children: [
+                              if (a['type'] == 'followup') ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text('Follow up',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppTheme.primaryColor,
+                                      )),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              Text(
+                                at.length >= 16 ? 'Sent ${at.substring(0, 10)} at ${at.substring(11, 16)}' : 'Sent just now',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ],
                           ),
                           trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.textSecondary),
                           onTap: () => onOpenPatient(a['id'] as String? ?? ''),
@@ -875,4 +1183,84 @@ class _IncomingPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Simple 7-day grouped bar chart (visits + prescriptions) drawn without
+/// external chart packages.
+class _WeeklyBarsPainter extends CustomPainter {
+  final List<Map<String, dynamic>> days;
+
+  _WeeklyBarsPainter(this.days);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const visitsColor = AppTheme.primaryColor;
+    const rxColor = AppTheme.goldDeep;
+    const labelColor = AppTheme.textSecondary;
+    final paint = Paint()..isAntiAlias = true;
+
+    var maxVal = 1;
+    for (final d in days) {
+      final v = d['visits'] as int? ?? 0;
+      final p = d['prescriptions'] as int? ?? 0;
+      if (v > maxVal) maxVal = v;
+      if (p > maxVal) maxVal = p;
+    }
+
+    const bottomPad = 22.0;
+    const topPad = 16.0;
+    final chartHeight = size.height - bottomPad - topPad;
+    final slot = size.width / days.length;
+    final barWidth = slot * 0.16;
+    final gap = slot * 0.05;
+
+    for (var i = 0; i < days.length; i++) {
+      final d = days[i];
+      final visits = d['visits'] as int? ?? 0;
+      final prescriptions = d['prescriptions'] as int? ?? 0;
+      final centerX = slot * i + slot / 2;
+      final visitsH = visits <= 0 ? 0.0 : chartHeight * (visits / maxVal).toDouble();
+      final rxH = prescriptions <= 0 ? 0.0 : chartHeight * (prescriptions / maxVal).toDouble();
+
+      final rxRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(centerX - barWidth - gap / 2, topPad + chartHeight - rxH, barWidth, rxH),
+        const Radius.circular(4),
+      );
+      final visitsRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(centerX + gap / 2, topPad + chartHeight - visitsH, barWidth, visitsH),
+        const Radius.circular(4),
+      );
+
+      if (prescriptions > 0) paint.color = rxColor;
+      canvas.drawRRect(rxRect, paint);
+      if (visits > 0) paint.color = visitsColor;
+      canvas.drawRRect(visitsRect, paint);
+
+      if (visits > 0) {
+        _drawCount(canvas, '${visits + prescriptions}', Offset(centerX, topPad + chartHeight - (visitsH > rxH ? visitsH : rxH) - 10), paint, labelColor);
+      } else if (prescriptions > 0) {
+        _drawCount(canvas, '$prescriptions', Offset(centerX, topPad + chartHeight - rxH - 10), paint, labelColor);
+      }
+
+      final tp = TextPainter(
+        text: TextSpan(
+          text: (d['fullLabel'] as String? ?? ''),
+          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: labelColor),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(centerX - tp.width / 2, topPad + chartHeight + 5));
+    }
+  }
+
+  void _drawCount(Canvas canvas, String text, Offset at, Paint paint, Color color) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: color)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(at.dx - tp.width / 2, at.dy));
+  }
+
+  @override
+  bool shouldRepaint(_WeeklyBarsPainter oldDelegate) => oldDelegate.days != days;
 }

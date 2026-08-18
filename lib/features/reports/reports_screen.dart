@@ -12,6 +12,7 @@ import '../../core/utils/arabic_pdf.dart';
 import '../../core/utils/pdf_fonts.dart';
 import '../../core/utils/platform_helper.dart';
 import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/app_shell.dart';
 import '../../shared/widgets/luxury_figures.dart';
 
 class ReportsScreen extends ConsumerWidget {
@@ -21,7 +22,7 @@ class ReportsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(title: const Text('Reports & Export')),
-      drawer: const AppDrawer(),
+      drawer: AppShell.usesFixedNav(context) ? null : const AppDrawer(),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

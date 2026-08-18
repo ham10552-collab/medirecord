@@ -25,13 +25,14 @@ class MediRecordApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
     final themeMode = ref.watch(themeModeProvider);
+    final density = ref.watch(displayDensityProvider);
 
     return MaterialApp.router(
       title: 'MediRecord Pro',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: scaffoldMessengerKey,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
+      theme: AppTheme.applyDensity(AppTheme.lightTheme, density),
+      darkTheme: AppTheme.applyDensity(AppTheme.darkTheme, density),
       themeMode: themeMode,
       routerConfig: router,
       scrollBehavior: const _MouseDragScrollBehavior(),

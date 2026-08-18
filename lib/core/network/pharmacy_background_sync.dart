@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database_helper.dart';
 import '../database/database_provider.dart';
@@ -111,8 +112,8 @@ void startPharmacyBackgroundSync(ProviderContainer container) {
       if (fetched) {
         container.invalidate(pharmacyQueueProvider);
       }
-    } catch (_) {
-      // Offline / missing doctor PC mid-tick - just try again next tick.
+    } catch (e, st) {
+      debugPrint('PHARMACY_SYNC_ERROR: $e\n$st');
     }
   });
 }

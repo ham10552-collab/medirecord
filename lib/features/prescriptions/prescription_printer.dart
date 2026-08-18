@@ -600,3 +600,167 @@ Future<String> generatePharmacyReportPdf(
   return await PlatformHelper.savePdf(
       await pdf.save(), 'pharmacy_report_$day.pdf');
 }
+
+/// Generates a printable lab result sheet from a completed lab request.
+Future<String> generateLabResultPdf(Map<String, dynamic> request) async {
+  final pdf = pw.Document();
+  final requested = (request['requested_at'] as String? ?? '');
+  final completed = (request['completed_at'] as String? ?? '');
+  final reqDate = requested.length >= 10 ? requested.substring(0, 10) : requested;
+  final compDate = completed.length >= 10 ? completed.substring(0, 10) : completed;
+  final items = ((request['items'] as List?) ?? const [])
+      .map((i) => (i as Map).cast<String, dynamic>())
+      .toList();
+  final id = (request['id'] as String? ?? '');
+
+  pdf.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(34),
+      theme: await arabicPdfTheme(),
+      build: (ctx) => [
+        pw.Container(
+          padding: const pw.EdgeInsets.all(14),
+          decoration: pw.BoxDecoration(
+            color: _goldLight,
+            borderRadius: const pw.BorderRadius.only(
+              topLeft: pw.Radius.circular(8),
+              topRight: pw.Radius.circular(8),
+            ),
+          ),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('MediRecord',
+                      style: pw.TextStyle(
+                        fontSize: 20,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _navy,
+                        letterSpacing: 0.4,
+                      )),
+                  pw.SizedBox(height: 2),
+                  pw.Text('LABORATORY RESULT REPORT',
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _navyDeep,
+                        letterSpacing: 2,
+                      )),
+                ],
+              ),
+              pw.Container(
+                width: 42,
+                height: 42,
+                decoration: pw.BoxDecoration(
+                  shape: pw.BoxShape.circle,
+                  border: pw.Border.all(color: _navy, width: 2),
+                ),
+                alignment: pw.Alignment.center,
+                child: pw.Text('Lab',
+                    style: pw.TextStyle(
+                      fontSize: 16,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _navy,
+                    )),
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Text('Completed: $compDate',
+                      style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey800)),
+                  pw.SizedBox(height: 4),
+                  pw.Text('ID: ${id.length >= 8 ? id.substring(0, 8) : id}',
+                      style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        pw.Container(
+          height: 4,
+          decoration: const pw.BoxDecoration(
+            gradient: pw.LinearGradient(colors: [_goldDeep, _goldLight, _goldDeep]),
+          ),
+        ),
+        pw.SizedBox(height: 16),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(arabicToPdf('Patient: ${request['patient_name'] ?? 'Unknown'}'),
+                    style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: _navy)),
+                if ((request['patient_phone'] as String? ?? '').trim().isNotEmpty)
+                  pw.Text(arabicToPdf('Phone: ${request['patient_phone']}'),
+                      style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+              ],
+            ),
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Text(arabicToPdf('Doctor: ${request['doctor_name'] ?? '-'}'),
+                    style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey800)),
+                pw.Text('Ordered: $reqDate',
+                    style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
+                if (((request['lab_technician'] as String?) ?? '').isNotEmpty)
+                  pw.Text(arabicToPdf('Technician: ${request['lab_technician']}'),
+                      style: pw.TextStyle(fontSize: 10, color: _goldDeep, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 18),
+        pw.TableHelper.fromTextArray(
+          headerDecoration: const pw.BoxDecoration(color: _navy),
+          headerStyle: const pw.TextStyle(
+              color: PdfColors.white, fontSize: 10, fontWeight: pw.FontWeight.bold),
+          cellStyle: const pw.TextStyle(fontSize: 9),
+          headers: ['#', 'Test', 'Result', 'Normal Range', 'Unit', 'Flag'],
+          data: [
+            for (var i = 0; i < items.length; i++)
+              [
+                '${i + 1}',
+                arabicToPdf('${items[i]['test_name'] ?? '-'}'
+                    '${(items[i]['note'] as String? ?? '').trim().isEmpty ? '' : ' (${items[i]['note']})'}'),
+                items[i]['value'] as String? ?? '-',
+                (items[i]['normal_range'] as String? ?? '') == ''
+                    ? '-'
+                    : arabicToPdf(items[i]['normal_range'] as String),
+                (items[i]['unit'] as String? ?? '') == ''
+                    ? '-'
+                    : arabicToPdf(items[i]['unit'] as String),
+                (items[i]['abnormal'] == true) ? 'ABNORMAL' : 'Normal',
+              ],
+          ],
+          oddRowDecoration: const pw.BoxDecoration(
+              color: PdfColor.fromInt(0xFFF4F1E6)),
+          cellAlignments: {
+            0: pw.Alignment.centerLeft,
+            1: pw.Alignment.centerLeft,
+            2: pw.Alignment.centerLeft,
+            3: pw.Alignment.centerLeft,
+            4: pw.Alignment.centerLeft,
+            5: pw.Alignment.centerLeft,
+          },
+        ),
+        pw.SizedBox(height: 24),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(arabicToPdf('Results marked ABNORMAL fall outside the reference range.'),
+                style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey500)),
+            pw.Text('Generated by MediRecord Pro',
+                style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey500)),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  final stamp = DateTime.now().millisecondsSinceEpoch % 100000;
+  return await PlatformHelper.savePdf(await pdf.save(), 'lab_result_$stamp.pdf');
+}

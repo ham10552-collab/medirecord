@@ -5,12 +5,10 @@ enum ServerState { stopped, starting, running, error }
 
 class PatientServer extends ChangeNotifier {
   ServerState _state = ServerState.stopped;
-  String _error = '';
-  int _port = 9876;
-  String _ip = '';
-  String _lastPatientName = '';
-
-  String _doctorIdentity = '';
+  final String _error = '';
+  final int _port = 9876;
+  final String _ip = '';
+  final String _lastPatientName = '';
 
   ServerState get state => _state;
   String get error => _error;
@@ -18,9 +16,8 @@ class PatientServer extends ChangeNotifier {
   String get ip => _ip;
   String get lastPatientName => _lastPatientName;
 
-  /// The logged-in doctor's name, stamped onto prescriptions that have no
-  /// real doctor name so the pharmacy never sees 'Unknown'.
-  void setDoctorIdentity(String name) => _doctorIdentity = name;
+  /// Required to match the real server API; the stub never stamps names.
+  void setDoctorIdentity(String name) {}
 
   Future<void> start({int port = 9876}) async {
     _state = ServerState.stopped;
@@ -30,11 +27,6 @@ class PatientServer extends ChangeNotifier {
   Future<void> stop() async {
     _state = ServerState.stopped;
     notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
   }
 }
 

@@ -36,16 +36,6 @@ final patientMedicationsProvider = FutureProvider.family<List, String>((ref, pat
   return db.getPatientMedications(patientId);
 });
 
-final patientAllergiesProvider = FutureProvider.family<List, String>((ref, patientId) async {
-  final db = ref.watch(databaseProvider);
-  return db.getPatientAllergies(patientId);
-});
-
-final patientSurgeriesProvider = FutureProvider.family<List, String>((ref, patientId) async {
-  final db = ref.watch(databaseProvider);
-  return db.getPatientSurgeries(patientId);
-});
-
 final patientPrescriptionsProvider = FutureProvider.family<List, String>((ref, patientId) async {
   final db = ref.watch(databaseProvider);
   return db.getPatientPrescriptions(patientId);

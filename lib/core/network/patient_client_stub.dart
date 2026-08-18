@@ -22,4 +22,14 @@ class PatientClient {
   static Future<Map<String, dynamic>?> fetchQueueStatus(String ip, int port) async {
     return null;
   }
+
+  static Future<(List<dynamic>, String?)> fetchLabTests(String ip, int port,
+      {int timeoutSec = 8}) async {
+    return (const [], 'LAN client not available on web');
+  }
+
+  static Future<Map<String, dynamic>> sendLabResult(
+      Map<String, dynamic> request, String ip, int port) async {
+    return {'status': 'error', 'message': 'LAN client not available on web'};
+  }
 }

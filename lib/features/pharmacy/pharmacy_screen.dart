@@ -10,6 +10,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/app_storage.dart';
 import '../../shared/models/prescription.dart';
 import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/app_shell.dart';
+import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/luxury_figures.dart';
 import '../prescriptions/prescription_printer.dart';
 
@@ -31,6 +33,8 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
   Timer? _pollTimer;
   int _lastSeenCount = -1;
   List<Map<String, String>> _doctors = [];
+  final Map<String, bool> _doctorOnline = {};
+  bool _checkingDoctors = false;
   String _view = 'queue';
   List<Map<String, dynamic>> _stock = [];
   String _stockQuery = '';
@@ -50,6 +54,31 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
   void dispose() {
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _checkDoctors() async {
+    if (_doctors.isEmpty || _checkingDoctors) return;
+    _checkingDoctors = true;
+    try {
+      final results = await Future.wait(_doctors.map((d) async {
+        final ip = (d['ip'] ?? '').trim();
+        if (ip.isEmpty) return false;
+        final port = int.tryParse(d['port'] ?? '') ?? 9876;
+        try {
+          return await PatientClient.fetchQueueStatus(ip, port) != null;
+        } catch (_) {
+          return false;
+        }
+      }));
+      if (!mounted) return;
+      setState(() {
+        for (var i = 0; i < _doctors.length && i < results.length; i++) {
+          _doctorOnline[(_doctors[i]['ip'] ?? '')] = results[i];
+        }
+      });
+    } finally {
+      _checkingDoctors = false;
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -102,6 +131,7 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
         ),
       );
     }
+    _checkDoctors();
   }
 
   Future<void> _manageDoctors() async {
@@ -140,6 +170,19 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
                   for (var i = 0; i < ctrls.length; i++) ...[
                     Row(
                       children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          margin: const EdgeInsets.only(right: 6),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _doctorOnline.containsKey(working[i]['ip'])
+                                ? (_doctorOnline[working[i]['ip']]!
+                                    ? AppTheme.successColor
+                                    : AppTheme.errorColor)
+                                : Colors.grey,
+                          ),
+                        ),
                         Expanded(
                           flex: 3,
                           child: TextField(
@@ -182,15 +225,15 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
                     onPressed: () {
                       setDlg(() {
                         ctrls.add([
-                          TextEditingController(text: 'Doctor PC ${ctrls.length + 1}'),
+                          TextEditingController(text: 'Doctor ${ctrls.length + 1}'),
                           TextEditingController(),
                           TextEditingController(text: '9876'),
                         ]);
-                        working.add({'name': '', 'ip': '', 'port': '9876'});
+                        working.add({'name': 'Doctor ${working.length + 1}', 'ip': '', 'port': '9876'});
                       });
                     },
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add doctor PC'),
+                    label: const Text('Add doctor'),
                   ),
                 ],
               ),
@@ -201,9 +244,11 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
             ElevatedButton(
               onPressed: () async {
                 final list = <Map<String, String>>[];
+                final seenIps = <String>{};
                 for (var i = 0; i < ctrls.length; i++) {
                   final ip = ctrls[i][1].text.trim();
-                  if (ip.isEmpty) continue;
+                  if (ip.isEmpty || seenIps.contains(ip)) continue;
+                  seenIps.add(ip);
                   list.add({
                     'name': ctrls[i][0].text.trim().isEmpty
                         ? 'Doctor PC ${i + 1}'
@@ -374,13 +419,11 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
     final db = DatabaseHelper();
     final matched = <String>[];
     final missing = <String>[];
-    int matchedCount = 0;
     for (final item in (rx['items'] as List? ?? [])) {
       final name = ((item as Map<String, dynamic>)['medicine_name'] as String? ?? '').trim();
       if (name.isEmpty) continue;
       if (await db.adjustInventory(name, delta) > 0) {
         if (!matched.contains(name)) matched.add(name);
-        matchedCount++;
       } else if (!missing.contains(name)) {
         missing.add(name);
       }
@@ -830,10 +873,11 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
           ),
         ),
       ),
-      drawer: const AppDrawer(),
-      body: Column(
+      drawer: AppShell.usesFixedNav(context) ? null : const AppDrawer(),
+        body: Column(
         children: [
           _syncBanner(),
+          _doctorsPanel(),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Row(
@@ -955,18 +999,22 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
               const SizedBox(height: 4),
               if (items.isEmpty)
                 Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.local_pharmacy_outlined, size: 52, color: AppTheme.textSecondary.withValues(alpha: 0.4)),
-                        const SizedBox(height: 10),
-                        Text(
-                          _filter == 'pending' ? 'No pending prescriptions' : 'No dispensed prescriptions yet',
-                          style: const TextStyle(color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
+                  child: EmptyState(
+                    icon: _query.trim().isNotEmpty
+                        ? Icons.search_off_outlined
+                        : _filter == 'pending'
+                            ? Icons.schedule_send_outlined
+                            : Icons.medication_outlined,
+                    title: _query.trim().isNotEmpty
+                        ? 'No matches for "${_query.trim()}"'
+                        : _filter == 'pending'
+                            ? 'No pending prescriptions'
+                            : 'No dispensed prescriptions yet',
+                    message: _query.trim().isNotEmpty
+                        ? 'Try a different patient name, doctor or phone number.'
+                        : _filter == 'pending'
+                            ? 'Prescriptions sent by doctors will appear here.'
+                            : 'Dispensed medicines will be listed here for tracking.',
                   ),
                 )
               else
@@ -1062,6 +1110,21 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No pending prescriptions')));
                   return;
                 }
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Dispense all pending prescriptions?'),
+                    content: Text('All ${pending.length} pending prescription(s) will be marked as dispensed, stock will be deducted and the doctor will be notified.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Dispense All'),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok != true) return;
                 for (final rx in pending) {
                   await DatabaseHelper().updatePrescriptionStatus(
                     rx['id'] as String,
@@ -1143,27 +1206,16 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
         ),
         Expanded(
           child: items.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.inventory_2_outlined, size: 52, color: AppTheme.textSecondary.withValues(alpha: 0.4)),
-                      const SizedBox(height: 10),
-                      Text(
-                        q.isEmpty
-                            ? 'No stock yet - add your first medicine'
-                            : 'No stock matches your search',
-                        style: const TextStyle(color: AppTheme.textSecondary),
-                      ),
-                      const SizedBox(height: 10),
-                      if (q.isEmpty)
-                        ElevatedButton.icon(
-                          onPressed: () => _editStockItem(null),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Medicine'),
-                        ),
-                    ],
-                  ),
+              ? EmptyState(
+                  icon: q.isEmpty ? Icons.inventory_2_outlined : Icons.search_off_outlined,
+                  title: q.isEmpty
+                      ? 'No stock yet'
+                      : 'No stock matches your search',
+                  message: q.isEmpty
+                      ? 'Add your first medicine to start tracking inventory.'
+                      : 'Try a different medicine name.',
+                  actionLabel: q.isEmpty ? 'Add Medicine' : null,
+                  onAction: q.isEmpty ? () => _editStockItem(null) : null,
                 )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
@@ -1213,6 +1265,14 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
                               onPressed: () async {
                                 await DatabaseHelper().adjustInventory(name, 1);
                                 await _loadStock();
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context)
+                                    ..hideCurrentSnackBar()
+                                    ..showSnackBar(SnackBar(
+                                      content: Text('$name restocked (+1)'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ));
+                                }
                               },
                             ),
                             Container(
@@ -1237,6 +1297,14 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
                               onPressed: qty <= 0 ? null : () async {
                                 await DatabaseHelper().adjustInventory(name, -1);
                                 await _loadStock();
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context)
+                                    ..hideCurrentSnackBar()
+                                    ..showSnackBar(SnackBar(
+                                      content: Text('$name decremented (-1)'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ));
+                                }
                               },
                             ),
                             IconButton(
@@ -1286,13 +1354,14 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
     final formCtrl = TextEditingController(text: existing?['form'] as String? ?? '');
     final batchCtrl = TextEditingController(text: existing?['batch'] as String? ?? '');
     final expiryCtrl = TextEditingController(text: existing?['expiry'] as String? ?? '');
-    int qty = (existing?['quantity'] as num?)?.toInt() ?? 0;
-    int qtyHolder = qty;
+    final qtyCtrl = TextEditingController(
+      text: '${(existing?['quantity'] as num?)?.toInt() ?? 0}',
+    );
+    int qtyHolder = (existing?['quantity'] as num?)?.toInt() ?? 0;
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
+      builder: (ctx) => AlertDialog(
           title: Text(existing == null ? 'Add Medicine to Stock' : 'Edit Stock Item'),
           content: SizedBox(
             width: 360,
@@ -1335,7 +1404,7 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
-                          controller: TextEditingController(text: '$qtyHolder'),
+                          controller: qtyCtrl,
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(labelText: 'Quantity *'),
                           onChanged: (v) => qtyHolder = int.tryParse(v.trim()) ?? 0,
@@ -1363,16 +1432,96 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
                 });
                 if (ctx.mounted) Navigator.pop(ctx);
                 await _loadStock();
+                if (mounted) {
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(SnackBar(
+                      content: Text(existing != null ? 'Medicine updated' : 'Medicine added to stock'),
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                }
               },
               child: const Text('Save'),
             ),
           ],
         ),
+    );
+  }
+
+  Widget _doctorsPanel() {
+    if (_doctors.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Connected doctors (fixed IPs)',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _doctors.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final d = _doctors[i];
+                final ip = (d['ip'] ?? '').trim();
+                final online = _doctorOnline[ip] == true;
+                final checking = !_doctorOnline.containsKey(ip);
+                return InkWell(
+                  onTap: _manageDoctors,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: (online ? AppTheme.successColor : Colors.grey).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: (online ? AppTheme.successColor : Colors.grey).withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: checking
+                                ? Colors.grey
+                                : (online ? AppTheme.successColor : AppTheme.errorColor),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          d['name'] ?? 'Doctor',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          ip,
+                          style: const TextStyle(fontSize: 10.5, color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _syncBanner() {
+    final onlineCount = _doctors
+        .where((d) => _doctorOnline[(d['ip'] ?? '')] == true)
+        .length;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
@@ -1398,7 +1547,8 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  _syncStatus ?? 'Doctor PCs: ${_doctors.length} configured',
+                  _syncStatus ??
+                      'Doctor PCs: ${_doctors.length} configured ($onlineCount/${_doctors.length} online)',
                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1422,7 +1572,7 @@ class _PharmacyScreenState extends ConsumerState<PharmacyScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Text(
-                        'v24',
+                        'v25',
                         style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.goldDeep),
                       ),
                     ),

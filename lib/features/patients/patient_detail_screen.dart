@@ -1,8 +1,7 @@
-import 'dart:typed_data';
+﻿import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:path/path.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../../core/theme/app_theme.dart';
@@ -13,8 +12,9 @@ import '../../core/database/database_helper.dart';
 import '../../core/utils/arabic_pdf.dart';
 import '../../core/utils/pdf_fonts.dart';
 import '../../core/utils/platform_helper.dart';
-import '../../shared/widgets/vitals_card.dart';
 import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/app_shell.dart';
+import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/luxury_figures.dart';
 import '../../shared/models/patient.dart';
 import '../../shared/models/medical_history.dart';
@@ -23,6 +23,7 @@ import '../../shared/models/investigation.dart';
 import '../../shared/models/medication.dart';
 import '../../shared/models/allergy.dart';
 import '../../shared/models/prescription.dart';
+import '../../core/utils/lab_tests.dart';
 import '../prescriptions/prescription_printer.dart';
 import 'patient_provider.dart';
 
@@ -78,8 +79,9 @@ class _PatientDetailContent extends ConsumerWidget {
       });
     }
     return DefaultTabController(
-      length: 6,
+      length: 9,
       child: Scaffold(
+        drawer: AppShell.usesFixedNav(context) ? null : const AppDrawer(),
         appBar: AppBar(
           title: Text(patient.fullName),
           actions: [
@@ -106,7 +108,39 @@ class _PatientDetailContent extends ConsumerWidget {
             ),
             IconButton(
               icon: const Icon(Icons.edit),
+              tooltip: 'Edit patient',
               onPressed: () => context.push('/patients/edit/${patient.id}'),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              tooltip: 'Delete patient',
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Delete patient?'),
+                    content: Text('${patient.fullName} and ALL related records (history, exams, investigations, medications, surgeries, allergies, prescriptions) will be permanently deleted. This cannot be undone.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Delete Permanently'),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok != true) return;
+                await DatabaseHelper().deletePatient(patient.id);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(SnackBar(
+                    content: Text('${patient.fullName} deleted'),
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                context.go('/patients');
+              },
             ),
           ],
           bottom: const TabBar(
@@ -119,6 +153,7 @@ class _PatientDetailContent extends ConsumerWidget {
               Tab(text: 'Investigations'),
               Tab(text: 'Medications'),
               Tab(text: 'Prescriptions'),
+              Tab(text: 'Lab'),
             ],
           ),
         ),
@@ -130,6 +165,7 @@ class _PatientDetailContent extends ConsumerWidget {
             _InvestigationsTab(patientId: patient.id),
             _MedicationsTab(patientId: patient.id),
             _PrescriptionsTab(patientId: patient.id, patient: patient),
+            _LabTab(patientId: patient.id),
           ],
         ),
       ),
@@ -351,7 +387,7 @@ class _ProfileTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${patient.age} yrs  •  ${patient.gender}  •  ${patient.bloodGroup ?? 'Unknown blood group'}',
+                          '${patient.age} yrs  â€¢  ${patient.gender}  â€¢  ${patient.bloodGroup ?? 'Unknown blood group'}',
                           style: TextStyle(color: Colors.white.withValues(alpha: 0.88), fontSize: 13),
                         ),
                       ],
@@ -360,6 +396,26 @@ class _ProfileTab extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => context.push('/patients/${patient.id}/examinations/add'),
+                  icon: const Icon(Icons.medical_services_outlined, size: 19),
+                  label: const Text('Examination'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => context.push('/patients/${patient.id}/prescriptions/add'),
+                  icon: const Icon(Icons.description_outlined, size: 19),
+                  label: const Text('Prescription'),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           const LuxSectionTitle(title: 'Personal Information', icon: Icons.badge_outlined),
@@ -459,7 +515,17 @@ class _HistoryTab extends ConsumerWidget {
 
     return Scaffold(
       body: historyAsync.when(
-        data: (history) => ListView.builder(
+        data: (history) {
+          if (history.isEmpty) {
+            return EmptyState(
+              icon: Icons.history,
+              title: 'No history yet',
+              message: 'Add the patient\'s medical history, allergies and surgeries.',
+              actionLabel: 'Add History',
+              onAction: () => context.push('/patients/${patientId}/history/add'),
+            );
+          }
+          return ListView.builder(
           padding: const EdgeInsets.all(8),
           itemCount: history.length + 1,
           itemBuilder: (context, i) {
@@ -507,15 +573,39 @@ class _HistoryTab extends ConsumerWidget {
                   ],
                   onSelected: (v) async {
                     if (v == 'delete') {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete history record?'),
+                          content: Text('${h.conditionName} will be removed from this patient record.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                            FilledButton(
+                              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (ok != true) return;
                       await DatabaseHelper().deleteMedicalHistory(h.id);
                       ref.invalidate(patientMedicalHistoryProvider(patientId));
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context)
+                        ..hideCurrentSnackBar()
+                        ..showSnackBar(const SnackBar(
+                          content: Text('History record deleted'),
+                          behavior: SnackBarBehavior.floating,
+                        ));
                     }
                   },
                 ),
               ),
             );
           },
-        ),
+        );
+        },
         error: (_, __) => const Center(child: Text('Error')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
@@ -538,21 +628,21 @@ class _ExamsTab extends ConsumerWidget {
 
     return Scaffold(
       body: examsAsync.when(
-        data: (exams) => ListView.builder(
+        data: (exams) {
+          if (exams.isEmpty) {
+            return EmptyState(
+              icon: Icons.medical_services_outlined,
+              title: 'No examinations yet',
+              message: 'Record the first examination with vital signs, diagnosis and plan.',
+              actionLabel: 'Add Examination',
+              onAction: () => context.push('/patients/${patientId}/examinations/add'),
+            );
+          }
+          return ListView.builder(
           padding: const EdgeInsets.all(8),
-          itemCount: exams.length + 1,
+          itemCount: exams.length,
           itemBuilder: (context, i) {
-            if (i == 0) {
-              return Padding(
-                padding: const EdgeInsets.all(8),
-                child: ElevatedButton.icon(
-                  onPressed: () => context.push('/patients/${patientId}/examinations/add'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add Examination'),
-                ),
-              );
-            }
-            final e = exams[i - 1];
+            final e = exams[i];
             final vitals = <String>[
               if (e.bp != null) 'BP: ${e.bp}',
               if (e.heartRate != null) 'HR: ${e.heartRate}',
@@ -569,11 +659,51 @@ class _ExamsTab extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      e.doctorName.trim().isEmpty
-                          ? e.visitDate
-                          : 'Dr. ${e.doctorName} - ${e.visitDate}',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            e.doctorName.trim().isEmpty
+                                ? e.visitDate
+                                : 'Dr. ${e.doctorName} - ${e.visitDate}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        PopupMenuButton<String>(
+                          tooltip: 'Actions',
+                          onSelected: (v) async {
+                            if (v != 'delete') return;
+                            final ok = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Delete examination?'),
+                                content: Text('Examination from ${e.visitDate} will be removed from this patient record.'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                  FilledButton(
+                                    style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('Delete'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (ok != true) return;
+                            await DatabaseHelper().deleteExamination(e.id);
+                            ref.invalidate(patientExaminationsProvider(patientId));
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context)
+                              ..hideCurrentSnackBar()
+                              ..showSnackBar(const SnackBar(
+                                content: Text('Examination deleted'),
+                                behavior: SnackBarBehavior.floating,
+                              ));
+                          },
+                          itemBuilder: (ctx) => const [
+                            PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                          ],
+                        ),
+                      ],
                     ),
                     if (e.chiefComplaint != null) Text('Complaint: ${e.chiefComplaint}'),
                     if (vitals.isNotEmpty) ...[
@@ -593,7 +723,8 @@ class _ExamsTab extends ConsumerWidget {
               ),
             );
           },
-        ),
+        );
+        },
         error: (_, __) => const Center(child: Text('Error')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
@@ -628,20 +759,18 @@ class _InvestigationsTab extends ConsumerWidget {
           }
 
           if (investigations.isEmpty) {
-            return const Center(child: Text('No investigations recorded', style: TextStyle(color: AppTheme.textSecondary)));
+            return EmptyState(
+              icon: Icons.science_outlined,
+              title: 'No investigations recorded',
+              message: 'Add blood tests, imaging or any laboratory investigation for this patient.',
+              actionLabel: 'Add Investigation',
+              onAction: () => context.push('/patients/${patientId}/investigations/add'),
+            );
           }
 
           return ListView(
             padding: const EdgeInsets.all(8),
             children: [
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: ElevatedButton.icon(
-                  onPressed: () => context.push('/patients/${patientId}/investigations/add'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add Investigation'),
-                ),
-              ),
               ...grouped.entries.map((entry) {
                 final testName = entry.key;
                 final results = entry.value;
@@ -751,6 +880,40 @@ class _InvestigationsTab extends ConsumerWidget {
                                 )
                               else
                                 const SizedBox(width: 32),
+                              PopupMenuButton<String>(
+                                tooltip: 'Actions',
+                                onSelected: (v) async {
+                                  if (v != 'delete') return;
+                                  final ok = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text('Delete result?'),
+                                      content: Text('${r.testName} on ${r.investigationDate} will be removed from this patient record.'),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                        FilledButton(
+                                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                          onPressed: () => Navigator.pop(ctx, true),
+                                          child: const Text('Delete'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (ok != true) return;
+                                  await DatabaseHelper().deleteInvestigation(r.id);
+                                  ref.invalidate(patientInvestigationsProvider(patientId));
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context)
+                                    ..hideCurrentSnackBar()
+                                    ..showSnackBar(const SnackBar(
+                                      content: Text('Result deleted'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ));
+                                },
+                                itemBuilder: (ctx) => const [
+                                  PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                                ],
+                              ),
                             ],
                           ),
                         );
@@ -794,21 +957,21 @@ class _MedicationsTab extends ConsumerWidget {
 
     return Scaffold(
       body: medicationsAsync.when(
-        data: (medications) => ListView.builder(
+        data: (medications) {
+          if (medications.isEmpty) {
+            return EmptyState(
+              icon: Icons.medication_outlined,
+              title: 'No medications',
+              message: 'Add the current medications, dosage and frequency for this patient.',
+              actionLabel: 'Add Medication',
+              onAction: () => context.push('/patients/${patientId}/medications/add'),
+            );
+          }
+          return ListView.builder(
           padding: const EdgeInsets.all(8),
-          itemCount: medications.length + 1,
+          itemCount: medications.length,
           itemBuilder: (context, i) {
-            if (i == 0) {
-              return Padding(
-                padding: const EdgeInsets.all(8),
-                child: ElevatedButton.icon(
-                  onPressed: () => context.push('/patients/${patientId}/medications/add'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add Medication'),
-                ),
-              );
-            }
-            final m = medications[i - 1];
+            final m = medications[i];
             return Card(
               child: ListTile(
                 leading: Icon(m.isActive ? Icons.check_circle : Icons.cancel, color: m.isActive ? Colors.green : Colors.red),
@@ -820,15 +983,39 @@ class _MedicationsTab extends ConsumerWidget {
                   ],
                   onSelected: (v) async {
                     if (v == 'delete') {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete medication?'),
+                          content: Text('${m.drugName} will be removed from this patient record.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                            FilledButton(
+                              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (ok != true) return;
                       await DatabaseHelper().deleteMedication(m.id);
                       ref.invalidate(patientMedicationsProvider(patientId));
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context)
+                        ..hideCurrentSnackBar()
+                        ..showSnackBar(const SnackBar(
+                          content: Text('Medication deleted'),
+                          behavior: SnackBarBehavior.floating,
+                        ));
                     }
                   },
                 ),
               ),
             );
           },
-        ),
+        );
+        },
         error: (_, __) => const Center(child: Text('Error')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
@@ -912,36 +1099,19 @@ class _PrescriptionsTabState extends ConsumerState<_PrescriptionsTab> {
       body: prescriptionsAsync.when(
         data: (prescriptions) {
           if (prescriptions.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text('No prescriptions', style: TextStyle(color: AppTheme.textSecondary)),
-                  const SizedBox(height: 16),
-ElevatedButton.icon(
-                    onPressed: () => context.push('/patients/${_patientId}/prescriptions/add'),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Prescription'),
-                  ),
-                ],
-              ),
+            return EmptyState(
+              icon: Icons.description_outlined,
+              title: 'No prescriptions',
+              message: 'Create the first prescription with diagnosis, medicines and dosage.',
+              actionLabel: 'Add Prescription',
+              onAction: () => context.push('/patients/${_patientId}/prescriptions/add'),
             );
           }
           return ListView.builder(
             padding: const EdgeInsets.all(8),
-            itemCount: prescriptions.length + 1,
+            itemCount: prescriptions.length,
             itemBuilder: (context, i) {
-              if (i == 0) {
-                return Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: ElevatedButton.icon(
-                    onPressed: () => context.push('/patients/${_patientId}/prescriptions/add'),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Prescription'),
-                  ),
-                );
-              }
-              final rx = prescriptions[i - 1];
+              final rx = prescriptions[i];
               return Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Padding(
@@ -1032,6 +1202,40 @@ ElevatedButton.icon(
                                   }
                                 : () => _sendPrescriptionWhatsApp(rx, _patientPhone!),
                           ),
+                          PopupMenuButton<String>(
+                            tooltip: 'Actions',
+                            onSelected: (v) async {
+                              if (v != 'delete') return;
+                              final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Delete prescription?'),
+                                  content: Text('Prescription from ${rx.createdAt.length >= 10 ? rx.createdAt.substring(0, 10) : rx.createdAt} will be removed from this patient record.'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                    FilledButton(
+                                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: const Text('Delete'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (ok != true) return;
+                              await DatabaseHelper().deletePrescription(rx.id);
+                              ref.invalidate(patientPrescriptionsProvider(_patientId));
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context)
+                                ..hideCurrentSnackBar()
+                                ..showSnackBar(const SnackBar(
+                                  content: Text('Prescription deleted'),
+                                  behavior: SnackBarBehavior.floating,
+                                ));
+                            },
+                            itemBuilder: (ctx) => const [
+                              PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                            ],
+                          ),
                         ],
                       ),
                       if (rx.diagnosis.isNotEmpty) ...[
@@ -1111,4 +1315,256 @@ void _showImageDialog(BuildContext context, Uint8List imageBytes) {
       ),
     ),
   );
+}
+
+/// Lab tab inside the patient detail: orders for this patient + a button to
+/// request new tests directly (doctor machine only effectively).
+class _LabTab extends ConsumerStatefulWidget {
+  final String patientId;
+
+  const _LabTab({required this.patientId});
+
+  @override
+  ConsumerState<_LabTab> createState() => _LabTabState();
+}
+
+class _LabTabState extends ConsumerState<_LabTab> {
+  List<Map<String, dynamic>> _requests = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final all = await DatabaseHelper().getLabRequests();
+    if (!mounted) return;
+    setState(() {
+      _requests =
+          all.where((r) => r['patient_id'] == widget.patientId).toList();
+      _loading = false;
+    });
+  }
+
+  Future<void> _orderTests() async {
+    final selected = <Map<String, dynamic>>[];
+    final added = <String>{};
+    final customCtrl = TextEditingController();
+    final doctorName = (await ref.read(doctorNameProvider.future)).trim();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dlg) => StatefulBuilder(
+        builder: (dlgCtx, setDlg) => AlertDialog(
+          title: const Text('Order tests for this patient'),
+          content: SizedBox(
+            width: 460,
+            height: 380,
+            child: Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: labTestCatalog.length,
+                    itemBuilder: (_, i) {
+                      final t = labTestCatalog[i];
+                      final key = t.name.toLowerCase();
+                      return CheckboxListTile(
+                        dense: true,
+                        title: Text('${t.name} (${t.nameAr})',
+                            style: const TextStyle(fontSize: 13)),
+                        subtitle: Text('Normal: ${t.normalRange} ${t.unit}',
+                            style: const TextStyle(fontSize: 11)),
+                        value: added.contains(key),
+                        onChanged: (v) {
+                          setDlg(() {
+                            if (v == true) {
+                              added.add(key);
+                              selected.add({
+                                'test_name': t.name,
+                                'note': '',
+                                'value': '',
+                                'normal_range': t.normalRange,
+                                'unit': t.unit,
+                                'abnormal': false,
+                              });
+                            } else {
+                              added.remove(key);
+                              selected.removeWhere((s) =>
+                                  (s['test_name'] as String).toLowerCase() == key);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: customCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Custom test name (optional)',
+                          isDense: true,
+                          prefixIcon: Icon(Icons.add, size: 18),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle, color: AppTheme.goldDeep),
+                      onPressed: () {
+                        final name = customCtrl.text.trim();
+                        if (name.isEmpty) return;
+                        setDlg(() {
+                          selected.add({
+                            'test_name': name,
+                            'note': '',
+                            'value': '',
+                            'normal_range': '',
+                            'unit': '',
+                            'abnormal': false,
+                          });
+                          customCtrl.clear();
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dlgCtx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: selected.isEmpty
+                  ? null
+                  : () {
+                      DatabaseHelper().upsertLabRequest({
+                        'id': DateTime.now().microsecondsSinceEpoch.toString(),
+                        'patient_id': widget.patientId,
+                        'doctor_name': doctorName,
+                        'doctor_host': null,
+                        'ordered_by': doctorName,
+                        'requested_at': DateTime.now().toIso8601String(),
+                        'status': 'requested',
+                        'items': selected,
+                      });
+                      Navigator.pop(dlgCtx);
+                    },
+              child: Text('Send ${selected.length} test(s)'),
+            ),
+          ],
+        ),
+      ),
+    );
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Lab request sent - the lab will pull it automatically'),
+          backgroundColor: AppTheme.successColor,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    final completed =
+        _requests.where((r) => (r['status'] as String?) == 'completed').toList();
+    final pending =
+        _requests.where((r) => (r['status'] as String?) != 'completed').toList();
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        ElevatedButton.icon(
+          onPressed: _orderTests,
+          icon: const Icon(Icons.add),
+          label: const Text('Order Lab Tests'),
+        ),
+        const SizedBox(height: 8),
+        if (pending.isEmpty && completed.isEmpty) ...[
+          const SizedBox(height: 20),
+          EmptyState(
+            icon: Icons.biotech_outlined,
+            title: 'No lab orders for this patient yet',
+            message: 'Order blood tests, cultures or any lab work from the laboratory.',
+            actionLabel: 'Order Lab Tests',
+            onAction: _orderTests,
+          ),
+        ],
+        if (pending.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 6),
+            child: Text('Pending', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          ),
+          for (final r in pending)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.schedule, color: AppTheme.goldDeep),
+                title: Text(
+                    '${(r['items'] as List?)?.length ?? 0} test(s) ordered ${(r['requested_at'] as String? ?? '').substring(0, 10)}'),
+                subtitle: const Text('Waiting for the lab'),
+              ),
+            ),
+        ],
+        if (completed.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 6),
+            child: Text('Results', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          ),
+          for (final r in completed)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ExpansionTile(
+                leading: Icon(
+                  Icons.check_circle,
+                  color: ((r['items'] as List?) ?? const [])
+                          .any((it) => (it as Map<String, dynamic>)['abnormal'] == true)
+                      ? AppTheme.errorColor
+                      : AppTheme.successColor,
+                ),
+                title: Text(
+                    'Completed ${(r['completed_at'] as String? ?? '').substring(0, 10)}'
+                    ' â€¢ ${(r['items'] as List?)?.length ?? 0} test(s)'),
+                subtitle: (r['lab_technician'] as String? ?? '').isEmpty
+                    ? null
+                    : Text('By ${r['lab_technician']}'),
+                children: [
+                  for (final it in (r['items'] as List? ?? []))
+                    ListTile(
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                      title: Text(it['test_name'] as String? ?? '',
+                          style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                      subtitle: Text(
+                        'Normal: ${it['normal_range'] ?? '-'} ${it['unit'] ?? ''}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      trailing: Text(
+                        (it['value'] as String? ?? '').trim().isEmpty
+                            ? '-'
+                            : '${it['value']} ${it['unit'] ?? ''}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: it['abnormal'] == true
+                              ? AppTheme.errorColor
+                              : AppTheme.goldDeep,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ],
+    );
+  }
 }

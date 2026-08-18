@@ -18,7 +18,11 @@ import '../../core/database/database_helper.dart';
 import '../../shared/models/patient.dart';
 import '../../shared/widgets/patient_card.dart';
 import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/app_shell.dart';
+import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/luxury_figures.dart';
+import '../patients/duplicate_finder.dart';
+import 'secretary_tab.dart';
 
 class SecretaryScreen extends ConsumerStatefulWidget {
   const SecretaryScreen({super.key});
@@ -53,12 +57,11 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
   List<Patient> _returningSearchResults = [];
   bool _loadingPatients = true;
   String _searchQuery = '';
-  bool _showForm = true;
+  bool _showForm = false;
 
   final List<Map<String, dynamic>> _queueEntries = [];
   final Map<String, Map<String, dynamic>> _queueStatus = {};
   Timer? _queueTimer;
-  bool _showQueue = false;
   bool _queueOffline = false;
 
   @override
@@ -88,6 +91,12 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
       final fetched = await PatientClient.fetchQueueStatus(ip, port);
       networkFailed = fetched == null;
       if (fetched != null) statuses.addAll(fetched);
+      if (mounted && _checking == false) {
+        setState(() {
+          _connected = fetched != null;
+          _statusMsg = fetched != null ? 'Connected' : 'Connection failed';
+        });
+      }
     }
 
     // When the doctor server runs on this same machine (trial on one PC),
@@ -365,9 +374,9 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
         setState(() {
           _queueEntries.add({'id': data['id'], 'name': sentName, 'sentAt': DateTime.now().toIso8601String()});
           _queueStatus[data['id'] as String] = {'status': QueueStatus.statusWaiting, 'at': ''};
-          _showQueue = true;
           _showForm = false;
         });
+        ref.read(secretaryTabProvider.notifier).state = SecretaryTab.queue;
       }
       _clearForm();
       if (mounted) {
@@ -400,9 +409,9 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
         setState(() {
           _queueEntries.add({'id': data['id'], 'name': patient.fullName, 'sentAt': DateTime.now().toIso8601String()});
           _queueStatus[data['id'] as String] = {'status': QueueStatus.statusWaiting, 'at': ''};
-          _showQueue = true;
           _showForm = false;
         });
+        ref.read(secretaryTabProvider.notifier).state = SecretaryTab.queue;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${patient.fullName} sent as follow-up - in the waiting room'), backgroundColor: Colors.green),
@@ -426,14 +435,14 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        leading: (_showQueue || _showForm)
+        leading: (ref.watch(secretaryTabProvider) == SecretaryTab.queue || _showForm)
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
                 tooltip: 'Back',
-                onPressed: () => setState(() {
-                  _showQueue = false;
-                  _showForm = false;
-                }),
+                onPressed: () {
+                  setState(() => _showForm = false);
+                  ref.read(secretaryTabProvider.notifier).state = SecretaryTab.patients;
+                },
               )
             : null,
         title: const Row(
@@ -453,15 +462,36 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
           IconButton(
             icon: const Icon(Icons.people_alt_outlined),
             tooltip: 'Waiting Room',
-            onPressed: () => setState(() {
-              _showQueue = !_showQueue;
-              if (_showQueue) _loadQueue();
-            }),
+            onPressed: () {
+              final next = ref.read(secretaryTabProvider) == SecretaryTab.queue
+                  ? SecretaryTab.patients
+                  : SecretaryTab.queue;
+              ref.read(secretaryTabProvider.notifier).state = next;
+              if (next == SecretaryTab.queue) {
+                _loadQueue();
+              }
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.call_split_outlined),
+            tooltip: 'Find duplicates',
+            onPressed: () async {
+              final merged = await showDuplicateFinder(context);
+              if (merged) {
+                if (mounted) {
+                  _loadPatients();
+                  _loadQueue();
+                }
+              }
+            },
           ),
           IconButton(
             icon: Icon(_showForm ? Icons.list : Icons.add),
             tooltip: _showForm ? 'View Patients' : 'Add Patient',
-            onPressed: () => setState(() => _showForm = !_showForm),
+            onPressed: () => setState(() {
+              _showForm = !_showForm;
+              ref.read(secretaryTabProvider.notifier).state = SecretaryTab.patients;
+            }),
           ),
           IconButton(
             icon: const Icon(Icons.calendar_month),
@@ -482,8 +512,15 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
             ),
         ],
       ),
-      body: _showQueue ? _buildQueue() : (_showForm ? _buildForm() : _buildPatientList()),
-      drawer: const AppDrawer(),
+      body: Builder(
+        builder: (context) {
+          final tab = ref.watch(secretaryTabProvider);
+          if (tab == SecretaryTab.queue) return _buildQueue();
+          if (_showForm) return _buildForm();
+          return _buildPatientList();
+        },
+      ),
+      drawer: AppShell.usesFixedNav(context) ? null : const AppDrawer(),
     );
   }
 
@@ -513,10 +550,10 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
                     ],
                   ),
                   TextButton.icon(
-                    onPressed: () => setState(() {
-                      _showQueue = false;
-                      _showForm = false;
-                    }),
+                    onPressed: () {
+                      setState(() => _showForm = false);
+                      ref.read(secretaryTabProvider.notifier).state = SecretaryTab.patients;
+                    },
                     icon: const Icon(Icons.arrow_back, size: 16),
                     label: const Text('Back to main list'),
                   ),
@@ -563,25 +600,16 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
                           style: TextStyle(fontSize: 11, color: Colors.orange[800])),
                     ],
                   ),
-                ),
+),
             ],
           ),
         ),
         Expanded(
           child: entries.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const MedicalCrossFigure(size: 30, gold: false),
-                      const SizedBox(height: 16),
-                      Text('No patients in the queue yet', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 15)),
-                      const SizedBox(height: 8),
-                      Text('Patients you send to the doctor\nwill appear here with live status',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    ],
-                  ),
+              ? EmptyState(
+                  icon: Icons.groups_outlined,
+                  title: 'No patients in the queue yet',
+                  message: 'Patients you send to the doctor will appear here with live status.',
                 )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
@@ -631,6 +659,22 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
                               icon: const Icon(Icons.close, size: 16, color: Colors.grey),
                               tooltip: 'Remove from queue',
                               onPressed: () async {
+                                final ok = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Remove from queue?'),
+                                    content: Text('$name will be removed from the waiting room. This patient can be re-sent later.'),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                      FilledButton(
+                                        style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                        onPressed: () => Navigator.pop(ctx, true),
+                                        child: const Text('Remove'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (ok != true) return;
                                 await QueueStatus.removeSecretaryEntry(id);
                                 _loadQueue();
                                 if (mounted) setState(() {});
@@ -650,6 +694,52 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
   Widget _buildPatientList() {
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: (_connected ? AppTheme.successColor : AppTheme.errorColor).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: (_connected ? AppTheme.successColor : AppTheme.errorColor).withValues(alpha: 0.4),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _checking ? Colors.grey : (_connected ? AppTheme.successColor : AppTheme.errorColor),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _checking
+                        ? 'Checking doctor connection...'
+                        : _connected
+                            ? 'Doctor connected (${_ipCtrl.text.trim()})'
+                            : _ipCtrl.text.trim().isEmpty
+                                ? 'Doctor IP not set - enter it under "Doctor Connection" when adding a patient'
+                                : 'Doctor offline (${_ipCtrl.text.trim()}) - no connection',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: _connected ? AppTheme.successColor : AppTheme.errorColor,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _checking ? null : _testConnection,
+                  child: const Text('Check now'),
+                ),
+              ],
+            ),
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           child: Column(
@@ -710,6 +800,17 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
                           return PatientCard(
                             patient: patient,
                             onTap: () => _showPatientDetail(patient),
+                            action: IconButton(
+                              tooltip: 'Send to Doctor',
+                              onPressed: () => _sendExistingPatient(patient),
+                              icon: Icon(
+                                Icons.send,
+                                size: 20,
+                                color: _connected
+                                    ? AppTheme.successColor
+                                    : AppTheme.textSecondary,
+                              ),
+                            ),
                           );
                         },
                       ),
@@ -768,15 +869,14 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
                       ],
                     ),
                   ),
-                  if (_connected)
-                    IconButton(
-                      icon: const Icon(Icons.send, color: Colors.green),
-                      tooltip: 'Send to doctor',
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _sendExistingPatient(patient);
-                      },
-                    ),
+                  IconButton(
+                    icon: Icon(Icons.send, color: _connected ? Colors.green : AppTheme.textSecondary),
+                    tooltip: _connected ? 'Send to doctor' : 'Send to doctor (doctor offline)',
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _sendExistingPatient(patient);
+                    },
+                  ),
                   IconButton(
                     icon: const Icon(Icons.close),
                     tooltip: 'Close',
@@ -892,10 +992,10 @@ class _SecretaryScreenState extends ConsumerState<SecretaryScreen> {
               const Text('New Patient',
                   style: TextStyle(fontSize: 18, fontFamily: AppTheme.displayFont, fontWeight: FontWeight.w700)),
               TextButton.icon(
-                onPressed: () => setState(() {
-                  _showForm = false;
-                  _showQueue = false;
-                }),
+                onPressed: () {
+                  setState(() => _showForm = false);
+                  ref.read(secretaryTabProvider.notifier).state = SecretaryTab.patients;
+                },
                 icon: const Icon(Icons.arrow_back, size: 16),
                 label: const Text('Back to main list'),
               ),

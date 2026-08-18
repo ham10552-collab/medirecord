@@ -82,6 +82,18 @@ class RoleScreen extends ConsumerWidget {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: () => _pickRole(context, ref, 'lab'),
+                    icon: const Icon(Icons.science, size: 28),
+                    label: const Text("I'm a Lab Technician", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.navy,
+                      side: const BorderSide(color: AppTheme.primaryLight, width: 1.6),
+                      minimumSize: const Size(double.infinity, 62),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -95,10 +107,12 @@ class RoleScreen extends ConsumerWidget {
     await AppStorage.write('medirecord_role', role);
     // Force the router/drawer to see the NEW role before we navigate, so a
     // stale cached value can never route the doctor back to the pharmacy.
-    await ref.refresh(deviceRoleProvider.future);
+    ref.invalidate(deviceRoleProvider);
+    await ref.read(deviceRoleProvider.future);
     if (!context.mounted) return;
     if (role == 'secretary') context.go('/secretary');
     else if (role == 'pharmacist') context.go('/pharmacy');
+    else if (role == 'lab') context.go('/lab');
     else context.go('/');
   }
 }

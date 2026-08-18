@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../shared/widgets/luxury_figures.dart';
 
@@ -20,6 +21,13 @@ class ContactScreen extends StatelessWidget {
     return Scaffold(
       body: LuxNavyBackdrop(
         showBack: true,
+        onBack: () {
+          if (context.canPop()) {
+            Navigator.pop(context);
+          } else {
+            context.go('/');
+          }
+        },
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

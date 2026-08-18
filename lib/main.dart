@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 import 'app.dart';
+import 'core/network/lab_background_sync.dart';
+import 'core/network/lab_notifications.dart';
 import 'core/network/pharmacy_background_sync.dart';
 import 'core/network/pharmacy_notifications.dart';
 import 'core/database/database_provider.dart';
@@ -32,6 +34,9 @@ void main() async {
   if (!kIsWeb) {
     startPharmacyBackgroundSync(container);
     pharmacyNewRxNotifier.addListener(drainPharmacyNotifications);
+    startLabBackgroundSync(container);
+    labNewRequestNotifier.addListener(drainLabNewRequestNotifications);
+    labResultNotifier.addListener(drainLabResultNotifications);
     secretaryStatusNotifier.addListener(drainSecretaryStatusNotifications);
     incomingPatientNotifier.addListener(() {
       if (incomingPatientNotifier.value.isNotEmpty) {

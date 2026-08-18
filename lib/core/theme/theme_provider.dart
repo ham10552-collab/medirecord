@@ -39,3 +39,40 @@ class ThemeModeNotifier extends StateNotifier<ThemeMode> {
     } catch (_) {}
   }
 }
+
+enum AppDisplayDensity { compact, cozy, roomy }
+
+final displayDensityProvider =
+    StateNotifierProvider<DisplayDensityNotifier, AppDisplayDensity>((ref) {
+  return DisplayDensityNotifier();
+});
+
+class DisplayDensityNotifier extends StateNotifier<AppDisplayDensity> {
+  DisplayDensityNotifier() : super(AppDisplayDensity.cozy) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final saved = await AppStorage.read('display_density');
+      state = switch (saved) {
+        'compact' => AppDisplayDensity.compact,
+        'roomy' => AppDisplayDensity.roomy,
+        _ => AppDisplayDensity.cozy,
+      };
+    } catch (_) {
+      state = AppDisplayDensity.cozy;
+    }
+  }
+
+  Future<void> setDensity(AppDisplayDensity density) async {
+    state = density;
+    try {
+      await AppStorage.write('display_density', switch (density) {
+        AppDisplayDensity.compact => 'compact',
+        AppDisplayDensity.roomy => 'roomy',
+        AppDisplayDensity.cozy => 'cozy',
+      });
+    } catch (_) {}
+  }
+}

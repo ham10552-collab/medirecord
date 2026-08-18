@@ -42,13 +42,6 @@ class _HistoryFormScreenState extends ConsumerState<HistoryFormScreen> {
     _searchCtrl.addListener(_filter);
   }
 
-  void _clearQuickPicks() {
-    setState(() {
-      _filtered = List.from(AppConstants.commonConditions);
-      _filteredAllergens = List.from(AppConstants.commonAllergens);
-    });
-  }
-
   void _filter() {
     final q = _searchCtrl.text.toLowerCase();
     setState(() {
@@ -177,13 +170,6 @@ class _HistoryFormScreenState extends ConsumerState<HistoryFormScreen> {
       if (mounted) setState(() => _isSaving = false);
     }
   }
-
-  String get _quickTitle => switch (_historyType) {
-        'Surgical' => 'Quick Select - Surgeries',
-        'Allergy' => 'Quick Select - Allergens',
-        'Other' => 'Free entry',
-        _ => 'Quick Select - Conditions',
-      };
 
   String get _entryLabel => switch (_historyType) {
         'Surgical' => 'Surgery / Procedure',

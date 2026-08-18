@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'theme_provider.dart' show AppDisplayDensity;
 
 class AppTheme {
   // Rich navy + champagne gold luxury palette
@@ -62,9 +63,6 @@ class AppTheme {
       color: color,
       fontWeight: weight,
       letterSpacing: 0.4,
-      shadows: gold
-          ? const [Shadow(color: Color(0x33D4AF37), blurRadius: 6, offset: Offset(0, 1))]
-          : const [Shadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 1))],
     );
   }
 
@@ -107,9 +105,6 @@ class AppTheme {
           fontFamily: displayFont,
         ),
         iconTheme: IconThemeData(color: textPrimary),
-        shape: Border(
-          bottom: BorderSide(color: Color(0x33D4AF37), width: 1),
-        ),
       ),
       cardTheme: CardThemeData(
         elevation: 2,
@@ -237,6 +232,57 @@ class AppTheme {
     },
   );
 
+  // Applies the saved display density (Compact / Cozy / Roomy) on top of a
+  // base theme, mirroring Clinova's list density switcher. Density is applied
+  // through every channel the custom UI listens to so the change is clearly
+  // visible: toolbar height, input padding, card margins, list tiles and the
+  // global visual density.
+  static ThemeData applyDensity(ThemeData theme, AppDisplayDensity density) {
+    final compact = density == AppDisplayDensity.compact;
+    final roomy = density == AppDisplayDensity.roomy;
+    final visualDensity = compact
+        ? VisualDensity.compact
+        : (roomy ? VisualDensity.comfortable : VisualDensity.standard);
+    final double toolbarHeight = switch (density) {
+      AppDisplayDensity.compact => 48,
+      AppDisplayDensity.roomy => 70,
+      AppDisplayDensity.cozy => 56,
+    };
+    final inputPadding = switch (density) {
+      AppDisplayDensity.compact =>
+        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      AppDisplayDensity.roomy =>
+        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      AppDisplayDensity.cozy =>
+        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    };
+    final cardMargin = switch (density) {
+      AppDisplayDensity.compact => const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      AppDisplayDensity.roomy => const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      AppDisplayDensity.cozy => const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+    };
+    final tilePadding = switch (density) {
+      AppDisplayDensity.compact => 0.0,
+      AppDisplayDensity.roomy => 10.0,
+      AppDisplayDensity.cozy => 4.0,
+    };
+    return theme.copyWith(
+      visualDensity: visualDensity,
+      materialTapTargetSize: compact
+          ? MaterialTapTargetSize.shrinkWrap
+          : MaterialTapTargetSize.padded,
+      appBarTheme: theme.appBarTheme.copyWith(toolbarHeight: toolbarHeight),
+      inputDecorationTheme:
+          theme.inputDecorationTheme.copyWith(contentPadding: inputPadding),
+      cardTheme: theme.cardTheme.copyWith(margin: cardMargin),
+      listTileTheme: theme.listTileTheme.copyWith(
+        dense: compact,
+        visualDensity: visualDensity,
+        minVerticalPadding: tilePadding,
+      ),
+    );
+  }
+
   static ThemeData get darkTheme {
     final base = ThemeData(useMaterial3: true, brightness: Brightness.dark);
     return base.copyWith(
@@ -274,9 +320,6 @@ class AppTheme {
           fontFamily: displayFont,
         ),
         iconTheme: IconThemeData(color: Colors.white),
-        shape: Border(
-          bottom: BorderSide(color: Color(0x3DD4AF37), width: 1),
-        ),
       ),
       cardTheme: CardThemeData(
         elevation: 2,

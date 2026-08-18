@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database_helper.dart';
+import '../../core/utils/app_storage.dart';
+import '../../core/network/patient_client.dart';
+import '../../core/network/queue_status.dart';
 import '../../shared/models/booking.dart';
 import '../../shared/models/patient.dart';
 import '../../shared/widgets/app_drawer.dart';
+import '../../shared/widgets/app_shell.dart';
+import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/luxury_figures.dart';
+import '../../shared/widgets/skeleton.dart';
 
 class BookingScreen extends StatefulWidget {
   const BookingScreen({super.key});
@@ -17,8 +24,17 @@ class BookingScreen extends StatefulWidget {
 class _BookingScreenState extends State<BookingScreen> {
   DateTime _selectedDate = DateTime.now();
   List<Booking> _allBookings = [];
+  List<Booking> _upcoming = [];
   List<Patient> _patients = [];
   bool _loading = true;
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -30,9 +46,36 @@ class _BookingScreenState extends State<BookingScreen> {
     final bookings = await DatabaseHelper().getAllBookings();
     final patients = await DatabaseHelper().getAllPatients();
     if (!mounted) return;
+    final today = DateTime.now();
+    final todayKey = '${today.year.toString().padLeft(4, '0')}-'
+        '${today.month.toString().padLeft(2, '0')}-'
+        '${today.day.toString().padLeft(2, '0')}';
+    int timeMin(String t) {
+      final p = t.split(' ');
+      if (p.length != 2) return 0;
+      final hm = p[0].split(':');
+      var h = int.tryParse(hm[0]) ?? 0;
+      final m = int.tryParse(hm[1]) ?? 0;
+      final pm = p[1].toUpperCase() == 'PM';
+      if (pm && h != 12) h += 12;
+      if (!pm && h == 12) h = 0;
+      return h * 60 + m;
+    }
+
+    final upcoming = bookings
+        .where((b) =>
+            b.status != 'completed' &&
+            b.status != 'cancelled' &&
+            b.date.compareTo(todayKey) >= 0)
+        .toList()
+      ..sort((a, b) {
+        final byDate = a.date.compareTo(b.date);
+        return byDate != 0 ? byDate : timeMin(a.time) - timeMin(b.time);
+      });
     setState(() {
       _allBookings = bookings;
       _patients = patients;
+      _upcoming = upcoming;
       _loading = false;
     });
   }
@@ -180,9 +223,180 @@ class _BookingScreenState extends State<BookingScreen> {
     return h * 60 + m;
   }
 
+  Future<void> _addBookingPatient(Booking b) async {
+    final parts = b.patientName.trim().split(RegExp(r'\s+'));
+    final nameCtrl = TextEditingController(text: parts.isNotEmpty ? parts.first : '');
+    final lastNameCtrl = TextEditingController(text: parts.length > 1 ? parts.sublist(1).join(' ') : '');
+    final phoneCtrl = TextEditingController(text: b.phone ?? '');
+    final ageCtrl = TextEditingController();
+    String gender = 'Male';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              MedicalCrossFigure(size: 16),
+              SizedBox(width: 10),
+              Text('Add as New Patient'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'The patient has arrived - filling in the full record moves this booking into the patients list and removes it from bookings.',
+                  style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: nameCtrl,
+                        decoration: const InputDecoration(
+                            labelText: 'First Name', prefixIcon: Icon(Icons.person_outline)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: lastNameCtrl,
+                        decoration: const InputDecoration(labelText: 'Last Name'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: phoneCtrl,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                            labelText: 'Phone Number', prefixIcon: Icon(Icons.phone_outlined)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: ageCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            labelText: 'Age', prefixIcon: Icon(Icons.cake_outlined)),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Male'),
+                      selected: gender == 'Male',
+                      onSelected: (_) => setDialogState(() => gender = 'Male'),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('Female'),
+                      selected: gender == 'Female',
+                      onSelected: (_) => setDialogState(() => gender = 'Female'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.goldColor,
+                foregroundColor: AppTheme.navyDeep,
+              ),
+              onPressed: () {
+                if (nameCtrl.text.trim().isEmpty) return;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('Add Patient'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+
+    final patient = Patient(
+      id: const Uuid().v4(),
+      firstName: nameCtrl.text.trim().isEmpty ? 'Unknown' : nameCtrl.text.trim(),
+      lastName: lastNameCtrl.text.trim(),
+      age: int.tryParse(ageCtrl.text) ?? 0,
+      gender: gender,
+      phone: phoneCtrl.text.trim().isEmpty ? null : phoneCtrl.text.trim(),
+      address: null,
+      bloodGroup: null,
+      emergencyContactName: null,
+      emergencyContactPhone: null,
+      photoUrl: null,
+      createdBy: 'booking',
+      createdAt: DateTime.now().toIso8601String(),
+      updatedAt: DateTime.now().toIso8601String(),
+    );
+    final inserted = await DatabaseHelper().insertPatient(patient);
+    if (inserted == 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Trial limit reached (70 patients). Activate a license to continue.'),
+            backgroundColor: AppTheme.errorColor,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+    // Also send the patient to the doctor, so he lands in the doctor's
+    // waiting room / patient queue right away.
+    var sentToDoctor = false;
+    final ip = (await AppStorage.read('doctor_ip'))?.trim() ?? '';
+    if (ip.isNotEmpty) {
+      final port =
+          int.tryParse((await AppStorage.read('doctor_port'))?.trim() ?? '') ?? 9876;
+      final data = patient.toMap();
+      data['visit_type'] = 'first_visit';
+      final result = await PatientClient.sendPatient(data, ip, port);
+      sentToDoctor = result['status'] == 'ok';
+      if (sentToDoctor) {
+        await QueueStatus.addSecretaryEntry(patient.id, patient.fullName);
+      }
+    }
+    await DatabaseHelper().deleteBooking(b.id);
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(sentToDoctor
+            ? '${patient.fullName} added and sent to the doctor - now in the waiting room'
+            : '${patient.fullName} added as a patient (no doctor connection - not sent)'),
+        backgroundColor: sentToDoctor ? AppTheme.successColor : AppTheme.errorColor,
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
   Future<void> _changeStatus(Booking booking, String status) async {
     await DatabaseHelper().updateBooking(booking.copyWith(status: status));
     await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text('${booking.patientName} marked as ${_statusLabel(status)}'),
+        behavior: SnackBarBehavior.floating,
+      ));
   }
 
   Future<void> _deleteBooking(Booking booking) async {
@@ -204,6 +418,13 @@ class _BookingScreenState extends State<BookingScreen> {
     if (ok == true) {
       await DatabaseHelper().deleteBooking(booking.id);
       await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('Booking deleted'),
+          behavior: SnackBarBehavior.floating,
+        ));
     }
   }
 
@@ -257,28 +478,144 @@ class _BookingScreenState extends State<BookingScreen> {
             tooltip: 'Today',
             onPressed: () => setState(() => _selectedDate = DateTime.now()),
           ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'Add Booking',
-            onPressed: () => _addBooking(),
-          ),
         ],
       ),
-      drawer: const AppDrawer(),
+      drawer: AppShell.usesFixedNav(context) ? null : const AppDrawer(),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _addBooking(),
         child: const Icon(Icons.add),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const SkeletonPulse(child: SkeletonList())
           : Column(
               children: [
                 _buildSummaryHeader(),
                 _buildDaySelector(),
-                const SizedBox(height: 8),
+                _buildUpcomingPanel(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
+                    decoration: InputDecoration(
+                      hintText: 'Search by patient, phone or reason…',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                setState(() => _searchQuery = '');
+                              },
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: AppTheme.goldLight),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: AppTheme.goldLight.withValues(alpha: 0.5)),
+                      ),
+                    ),
+                  ),
+                ),
                 Expanded(child: _buildBookingsList()),
               ],
             ),
+    );
+  }
+
+  DateTime _parseDate(String d) {
+    final parts = d.split('-');
+    if (parts.length == 3) {
+      return DateTime(
+        int.tryParse(parts[0]) ?? DateTime.now().year,
+        int.tryParse(parts[1]) ?? 1,
+        int.tryParse(parts[2]) ?? 1,
+      );
+    }
+    return DateTime.now();
+  }
+
+  Widget _buildUpcomingPanel() {
+    if (_upcoming.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.calendar_month, size: 16, color: AppTheme.goldDeep),
+              SizedBox(width: 6),
+              Expanded(
+                child: Text('Upcoming Appointments',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppTheme.navy)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          for (final b in _upcoming.take(5))
+            InkWell(
+              onTap: () => setState(() => _selectedDate = _parseDate(b.date)),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 56,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.goldColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppTheme.goldColor.withValues(alpha: 0.45)),
+                      ),
+                      child: Text(
+                        b.time,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.goldDeep),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(b.patientName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                          Text(
+                            [
+                              if (b.date.length >= 10)
+                                '${b.date.substring(8, 10)}/${b.date.substring(5, 7)}/${b.date.substring(0, 4)}',
+                              if ((b.reason ?? '').trim().isNotEmpty) b.reason!,
+                            ].join('  •  '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -469,31 +806,28 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Widget _buildBookingsList() {
-    final dayBookings = _bookingsForDate(_selectedDate)..sort((a, b) => _timeMinutes(a.time) - _timeMinutes(b.time));
-    if (dayBookings.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const MedicalCrossFigure(size: 26, gold: false),
-            const SizedBox(height: 14),
-            Text(
-              'No appointments on this day',
-              style: AppTheme.displayStyle(size: 17, color: AppTheme.navy),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Tap + to schedule a patient visit',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: () => _addBooking(),
-              icon: const Icon(Icons.add),
-              label: const Text('Add Booking'),
-            ),
-          ],
-        ),
+    final dayBookings = _bookingsForDate(_selectedDate)
+      ..sort((a, b) => _timeMinutes(a.time) - _timeMinutes(b.time));
+    final visible = _searchQuery.isEmpty
+        ? dayBookings
+        : dayBookings.where((b) =>
+            b.patientName.toLowerCase().contains(_searchQuery) ||
+            (b.phone ?? '').toLowerCase().contains(_searchQuery) ||
+            (b.reason ?? '').toLowerCase().contains(_searchQuery)).toList();
+    if (visible.isEmpty) {
+      return EmptyState(
+        icon: Icons.event_available_outlined,
+        title: _searchQuery.isNotEmpty ? 'No matches for "$_searchQuery"' : 'No appointments on this day',
+        message: _searchQuery.isNotEmpty
+            ? 'Try a different name, phone number or reason.'
+            : 'Tap + to schedule a patient visit for ${_fmtDate(_selectedDate)}.',
+        actionLabel: _searchQuery.isNotEmpty ? 'Clear search' : 'Add Booking',
+        onAction: _searchQuery.isNotEmpty
+            ? () {
+                _searchCtrl.clear();
+                setState(() => _searchQuery = '');
+              }
+            : _addBooking,
       );
     }
 
@@ -525,7 +859,13 @@ class _BookingScreenState extends State<BookingScreen> {
               BoxShadow(color: AppTheme.navy.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 3)),
             ],
           ),
-          child: IntrinsicHeight(
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              onTap: patient.id.isNotEmpty ? () => context.push('/patients/${patient.id}') : null,
+              borderRadius: BorderRadius.circular(16),
+              child: IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -629,6 +969,22 @@ class _BookingScreenState extends State<BookingScreen> {
                           const SizedBox(height: 10),
                           Row(
                             children: [
+                              if (b.patientId.trim().isEmpty) ...[
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => _addBookingPatient(b),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: AppTheme.navyDeep,
+                                      minimumSize: const Size(0, 36),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      side: const BorderSide(color: AppTheme.goldDeep),
+                                    ),
+                                    icon: const Icon(Icons.person_add_alt, size: 15),
+                                    label: const Text('Add as Patient', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
                               Expanded(
                                 child: OutlinedButton.icon(
                                   onPressed: () => _changeStatus(b, 'confirmed'),
@@ -680,6 +1036,8 @@ class _BookingScreenState extends State<BookingScreen> {
                   ],
                 ),
               ],
+                ),
+              ),
             ),
           ),
         );

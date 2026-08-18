@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../utils/app_storage.dart';
@@ -8,11 +7,13 @@ import 'queue_status.dart';
 
 /// Incoming patient pushed by a secretary machine onto this doctor machine.
 /// Filled by the doctor's server handler; drained by [drainIncomingPatientNotifications].
-final ValueNotifier<List<String>> incomingPatientNotifier = ValueNotifier(const []);
+/// Each item: {'name': ..., 'type': 'new' | 'followup'}.
+final ValueNotifier<List<Map<String, String>>> incomingPatientNotifier =
+    ValueNotifier(const []);
 
-void notifyIncomingPatient(String fullName) {
-  final list = List<String>.from(incomingPatientNotifier.value);
-  list.add(fullName);
+void notifyIncomingPatient(String fullName, {String type = 'new'}) {
+  final list = List<Map<String, String>>.from(incomingPatientNotifier.value);
+  list.add({'name': fullName, 'type': type});
   if (list.length > 10) list.removeAt(0);
   incomingPatientNotifier.value = list;
 }
@@ -34,6 +35,8 @@ void notifyNewPharmacyRx(String id, String patient, String doctor,
 /// Persistent record of patients pushed by a secretary onto this (doctor)
 /// machine. Stored in app storage so alerts are never lost - the bell reads
 /// this even if a poll or popup was missed.
+/// Resending the same patient (follow-up) moves him back to the top and the
+/// bell lights up again instead of being silently ignored.
 Future<List<Map<String, dynamic>>> readIncomingAlerts() async {
   try {
     final raw = await AppStorage.read('incoming_alerts') ?? '';
@@ -44,13 +47,15 @@ Future<List<Map<String, dynamic>>> readIncomingAlerts() async {
   }
 }
 
-Future<void> recordIncomingAlert(String id, String fullName) async {
+Future<void> recordIncomingAlert(String id, String fullName,
+    {String type = 'new'}) async {
   try {
     final alerts = await readIncomingAlerts();
-    if (alerts.any((a) => a['id'] == id)) return;
+    alerts.removeWhere((a) => a['id'] == id);
     alerts.insert(0, {
       'id': id,
       'name': fullName,
+      'type': type,
       'at': DateTime.now().toIso8601String(),
       'read': false,
     });
@@ -134,24 +139,30 @@ void drainPharmacyNotifications() {
 }
 
 /// Shows secretary-sent patients as a SnackBar on any screen (doctor machine)
-/// with an alert beep.
+/// with an alert beep. Follow-ups show a distinct message.
 void drainIncomingPatientNotifications() {
   if (_drainingPatients) return;
   _drainingPatients = true;
   try {
-    final names = List<String>.from(incomingPatientNotifier.value);
-    if (names.isEmpty) return;
+    final items = List<Map<String, String>>.from(incomingPatientNotifier.value);
+    if (items.isEmpty) return;
     incomingPatientNotifier.value = const [];
     final messenger = scaffoldMessengerKey.currentState;
     if (messenger == null) {
-      incomingPatientNotifier.value = [...names, ...incomingPatientNotifier.value];
+      incomingPatientNotifier.value = [...items, ...incomingPatientNotifier.value];
       return;
     }
+    final fresh = items.where((i) => i['type'] != 'followup').length;
+    final followUps = items.length - fresh;
     final String text;
-    if (names.length == 1) {
-      text = 'New patient from secretary: ${names.first}';
+    if (items.length == 1) {
+      final it = items.first;
+      text = it['type'] == 'followup'
+          ? 'Follow-up from secretary: ${it['name']}'
+          : 'New patient from secretary: ${it['name']}';
     } else {
-      text = '${names.length} new patients from secretary';
+      text = '${items.length} patients from secretary'
+          '${followUps > 0 ? ' ($followUps follow-ups)' : ''}';
     }
     messenger
       ..hideCurrentSnackBar()
@@ -160,7 +171,11 @@ void drainIncomingPatientNotifications() {
         duration: const Duration(seconds: 6),
         behavior: SnackBarBehavior.floating,
       ));
-    WindowsNotifier.show('New patient', text, id: 2);
+    WindowsNotifier.show(
+      followUps > 0 && fresh == 0 ? 'Follow-up patient' : 'New patient',
+      text,
+      id: 2,
+    );
     try {
       SystemSound.play(SystemSoundType.alert);
     } catch (_) {}

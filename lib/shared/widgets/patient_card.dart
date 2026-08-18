@@ -6,8 +6,14 @@ import '../../shared/widgets/luxury_figures.dart';
 class PatientCard extends StatelessWidget {
   final Patient patient;
   final VoidCallback onTap;
+  final Widget? action;
 
-  const PatientCard({super.key, required this.patient, required this.onTap});
+  const PatientCard({
+    super.key,
+    required this.patient,
+    required this.onTap,
+    this.action,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -98,6 +104,7 @@ class PatientCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (action != null) action!,
               const SparkleStar(size: 12),
               const SizedBox(width: 10),
               Container(
